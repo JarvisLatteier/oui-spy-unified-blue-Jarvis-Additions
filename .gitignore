@@ -1,0 +1,9 @@
+.pio/
+.vscode/
+.DS_Store
+*.o
+*.d
+# firmware/*.bin
+__pycache__/
+.venv/
+Freenove_ESP32_S3_Display-main/

@@ -1,0 +1,61 @@
+/*
+ * Mode 1: OUI Spy Detector
+ * WiFi & BLE surveillance device scanner with web configuration.
+ * Wraps the original detector firmware in an anonymous namespace.
+ */
+
+// Board config MUST come first to set feature flags before conditional includes
+#include "board_config.h"
+
+// All includes from the original detector (outside namespace for correct linkage)
+#include <Arduino.h>
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <Preferences.h>
+#include <NimBLEDevice.h>
+#include <NimBLEUtils.h>
+#include <NimBLEScan.h>
+#include <NimBLEAdvertisedDevice.h>
+#include <esp_log.h>
+#include <esp_wifi.h>
+#include <nvs_flash.h>
+#include <vector>
+#include <algorithm>
+#if HAS_NEOPIXEL
+#include <Adafruit_NeoPixel.h>
+#endif
+#include "modes.h"
+#include "display.h"
+#include "sdlog.h"
+#include "led_strip.h"
+
+// Pin overrides for T-Dongle-S3 (must come before raw include)
+#ifdef BOARD_TDONGLE_S3
+  #undef BUZZER_PIN
+  #define BUZZER_PIN -1
+  #undef LED_PIN
+  #define LED_PIN -1
+  #undef NEOPIXEL_PIN
+  #define NEOPIXEL_PIN -1
+#endif
+
+// Volume-scaled buzzer duty cycle
+extern uint8_t buzzerVolume;
+#define BUZZER_DUTY ((int)(buzzerVolume / 2))
+
+// Rename setup/loop to avoid conflict with Arduino entry points
+#define setup detector_ns_setup
+#define loop  detector_ns_loop
+
+// Anonymous namespace: all symbols get internal linkage (no linker conflicts)
+namespace {
+#include "raw/detector.cpp"
+} // anonymous namespace
+
+#undef setup
+#undef loop
+
+// Exported mode entry points (called from main.cpp)
+void detector_setup() { detector_ns_setup(); }
+void detector_loop()  { detector_ns_loop(); }
