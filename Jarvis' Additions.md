@@ -1,5 +1,210 @@
 # Jarvis' Additions
 
+---
+
+# User Guide
+
+## Supported Hardware
+
+| Board | Modes | Display | Controls |
+|-------|-------|---------|----------|
+| Seeed XIAO ESP32-S3 | All (1, 2, 4, 5) | None | BOOT button, NeoPixel LED, buzzer |
+| LILYGO T-Dongle-S3 | All (1, 2, 4, 5) | 0.96" ST7735 (160x80) | BOOT button, APA102 LED, SD card |
+| Freenove ESP32-S3 CYD | Flock-You (4), Sky Spy (5) | 2.8" ILI9341 (320x240) touch | Touch screen, BOOT button, NeoPixel, speaker, SD card, GPS |
+
+## Getting Started
+
+### First Boot
+
+On first power-up the device enters **Selector Mode** (mode 0). From here you choose which firmware mode to run.
+
+### Returning to Selector Mode
+
+**From any mode**, hold the **BOOT button** (GPIO0) for **1.5 seconds** to return to the Selector menu. The device will beep 3 times to confirm and reboot.
+
+- On XIAO/T-Dongle: the BOOT button is the small tactile button on the board
+- On CYD: the BOOT button is on the back of the board
+- Works even if a mode's setup hangs (a background watchdog monitors the button)
+
+## Mode 0: Selector
+
+### XIAO / T-Dongle (Button + Web UI)
+
+1. Connect to WiFi AP **oui-spy** (password: **ouispy123**)
+2. Open **http://192.168.4.1** in a browser
+3. Tap a mode to select it — the device reboots into that mode
+
+**TFT menu (T-Dongle only):**
+- **Short press** BOOT button to cycle through modes on the display
+- **Long press** (1.5s) BOOT button to confirm and boot into the highlighted mode
+
+**Web UI controls:**
+- **SSID / PASSWORD fields** — customize the AP name and password, tap SET to save (reboots)
+- **BZR checkbox** — enable/disable buzzer for all modes
+- **INCOGNITO checkbox** — kills display and LED for covert operation
+- **DSP slider** — display backlight brightness (0-255)
+- **LED slider** — LED strip brightness (0-255)
+
+### CYD (Touch Screen)
+
+The CYD shows 3 touch buttons:
+- **FLOCK-YOU** — tap to boot into Flock-You mode
+- **SKY SPY** — tap to boot into Sky Spy mode
+- **SETTINGS** — brightness, volume, buzzer, and incognito controls
+
+**Settings page controls:**
+- **DSP +/-** — display backlight brightness
+- **LED +/-** — NeoPixel brightness
+- **VOL +/-** — speaker volume
+- **BZR** — buzzer enable/disable toggle
+- **INCOGNITO** — kills display and LED
+- **BACK** — return to mode selector
+
+All settings persist across reboots.
+
+## Mode 1: Detector (XIAO / T-Dongle only)
+
+Scans for specific BLE devices by MAC address or OUI prefix and alerts when they're detected.
+
+1. Connect to WiFi AP **snoopuntothem** (password: **astheysnoopuntous**)
+2. Open **http://192.168.4.1**
+3. Enter OUI prefixes (XX:XX:XX) and/or full MAC addresses to monitor
+4. Configure buzzer and LED alerts
+5. Tap **Save** — scanning begins immediately
+
+**Web dashboard features:**
+- Live detection list with MAC, RSSI, alias, and timestamp
+- Assign custom aliases to detected devices
+- Clear device history
+- Lock configuration to prevent accidental edits
+- Brightness sliders (display + LED)
+
+## Mode 2: Foxhunter (XIAO / T-Dongle only)
+
+Track down a single BLE device using RSSI signal strength — beeps get faster as you get closer.
+
+1. Connect to WiFi AP **foxhunter** (password: **foxhunter**)
+2. Open **http://192.168.4.1**
+3. Enter the target MAC address and tap **Save**
+4. Walk around — beep speed indicates proximity:
+
+| Signal Strength | Beep Interval |
+|----------------|---------------|
+| Very weak (-95 to -85 dBm) | 3 seconds |
+| Weak (-85 to -75 dBm) | 500-1000ms |
+| Medium (-75 to -55 dBm) | 100-200ms |
+| Strong (-55 to -35 dBm) | 10-50ms |
+
+**T-Dongle display** shows a large RSSI number with a color-coded proximity bar (red → yellow → green).
+
+If no configuration is entered within 20 seconds, Foxhunter auto-switches to tracking mode with the last saved target.
+
+## Mode 4: Flock-You
+
+Detects Flock Safety surveillance cameras and Raven gunshot detectors via BLE.
+
+1. Device creates WiFi AP **flockyou** (password: **flockyou123**)
+2. Open **http://192.168.4.1** for the live dashboard
+
+**Detection methods:**
+- 20 known Flock Safety MAC OUI prefixes
+- BLE device name matching (Flock, FS Ext Battery, Penguin, Pigvision)
+- BLE manufacturer ID (0x09C8 / XUNTONG)
+- Raven gunshot detector service UUIDs (8 patterns)
+
+**Dashboard features:**
+- Real-time detection list with signal strength
+- Detection statistics and Raven count
+- **Export options**: JSON, CSV, or KML (for Google Earth)
+- Session history with archiving
+- GPS wardriving — your phone's browser can share its location via the dashboard, tagging each detection with coordinates
+
+**GPS (CYD only):** The onboard GPS module automatically tags detections with coordinates without needing a phone.
+
+## Mode 5: Sky Spy
+
+Monitors for FAA Remote ID (Open Drone ID) broadcasts from drones over WiFi and BLE. No WiFi AP is created — this mode is passive.
+
+**What it detects:**
+- DJI drones (OcuSync 3.0+) and all FAA-compliant commercial UAVs
+- Extracts: drone ID, operator ID, GPS coordinates, altitude, speed, heading
+
+**WiFi channel hopping:**
+- Prioritizes channel 6 (NAN discovery, 500ms dwell)
+- Scans channels 1-13 (100ms each) for non-NAN beacons
+- Full sweep every ~1.7 seconds
+
+**Display footer:** `BLE:ON WiFi CH:N` shows the current WiFi channel being scanned.
+
+**On drone detection:**
+- Display shows drone ID, MAC, altitude, RSSI, and GPS coordinates
+- Buzzer sounds alert tone
+- NeoPixel flashes red (if LED enabled)
+- Footer updates to `Total:N BLE:ON WiFi CH:N`
+
+### CYD Touch Controls (Sky Spy)
+
+Two toggle buttons appear on the CYD display:
+- **LED** — toggle NeoPixel alerts on/off
+- **TONE** — toggle speaker alerts on/off
+
+Both settings persist across reboots.
+
+**NeoPixel behavior when LED is enabled:**
+| State | LED |
+|-------|-----|
+| Drone detected | Red flash |
+| Idle | Dim green heartbeat every 10 seconds |
+| Boot | Green flash |
+
+## SD Card Logging
+
+The T-Dongle and CYD support SD card logging. Insert a FAT32-formatted micro SD card (up to 64GB tested).
+
+**Log structure:**
+```
+/oui-spy/
+  detector/session_000001.jsonl
+  foxhunter/session_000001.jsonl
+  flockyou/session_000001.jsonl
+  skyspy/session_000001.jsonl
+```
+
+- Logs are JSONL format (one JSON object per line)
+- Session numbers auto-increment each boot
+- Files are only created when a detection occurs (no empty files)
+- Display footer shows `SD:OK / Files:N` with per-mode file count
+
+**Accessing logs:**
+- Remove the SD card and read on a computer
+- In Selector mode: use the web API endpoints:
+  - `http://192.168.4.1/sd/list` — list all log files as JSON
+  - `http://192.168.4.1/sd/download?file=skyspy/session_000001.jsonl` — download a file
+  - `http://192.168.4.1/sd/clear?confirm=yes` — delete all logs
+- In Flock-You mode: use the dashboard export buttons (JSON/CSV/KML)
+
+## Privacy Features
+
+- **MAC randomization** — the device generates a random MAC address on every boot
+- **Incognito mode** — kills display and LED for covert operation
+- **No cloud** — all data stays on the device and SD card, nothing is transmitted
+
+## AP Credentials Quick Reference
+
+| Mode | Default SSID | Default Password | IP Address |
+|------|-------------|-----------------|------------|
+| Selector | oui-spy | ouispy123 | 192.168.4.1 |
+| Detector | snoopuntothem | astheysnoopuntous | 192.168.4.1 |
+| Foxhunter | foxhunter | foxhunter | 192.168.4.1 |
+| Flock-You | flockyou | flockyou123 | 192.168.4.1 |
+| Sky Spy | *(none — no AP)* | — | — |
+
+The Selector AP SSID and password can be customized via the web UI or CYD settings.
+
+---
+
+# Technical Changes
+
 ## 1. Brightness / LED / Incognito Controls in All Boot Modes
 
 Previously, display brightness, LED strip brightness, and incognito mode controls only existed in the Selector (mode 0) web UI. Now these controls are available in every mode that has a web server:
