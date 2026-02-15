@@ -74,14 +74,17 @@ static unsigned long ssLastTouch = 0;
 // Backlight LEDC channel (channel 2 to avoid conflict with buzzer on ch1)
 #define BL_LEDC_CH     2
 
-// Selector button regions (three buttons side by side)
-#define SEL_BTN_Y      60
-#define SEL_BTN_H      130
-#define SEL_BTN_W      95
+// Selector button regions (two mode buttons + settings bar)
+#define SEL_BTN_Y      44
+#define SEL_BTN_H      104
+#define SEL_BTN_W      150
 #define SEL_BTN_GAP    12
 #define SEL_BTN1_X     4
 #define SEL_BTN2_X     (SEL_BTN1_X + SEL_BTN_W + SEL_BTN_GAP)
-#define SEL_BTN3_X     (SEL_BTN2_X + SEL_BTN_W + SEL_BTN_GAP)
+#define SEL_SET_Y      (SEL_BTN_Y + SEL_BTN_H + 10)
+#define SEL_SET_H      36
+#define SEL_SET_X      4
+#define SEL_SET_W      312
 
 // Settings touch debounce
 static unsigned long settings_last_touch = 0;
@@ -238,15 +241,18 @@ int display_selector_touch() {
     int16_t tx, ty;
     if (!display_touch_read(tx, ty)) return -1;
 
-    // Check if touch is in button Y range
-    if (ty >= SEL_BTN_Y - 10 && ty <= SEL_BTN_Y + SEL_BTN_H + 10) {
-        // Use midpoints between buttons as boundaries (no dead zones)
-        int mid12 = SEL_BTN1_X + SEL_BTN_W + SEL_BTN_GAP / 2;
-        int mid23 = SEL_BTN2_X + SEL_BTN_W + SEL_BTN_GAP / 2;
-        if (tx < mid12) return 4;
-        if (tx < mid23) return 5;
+    // Mode buttons (top row)
+    if (ty >= SEL_BTN_Y - 6 && ty <= SEL_BTN_Y + SEL_BTN_H + 6) {
+        int mid = SEL_BTN1_X + SEL_BTN_W + SEL_BTN_GAP / 2;
+        if (tx < mid) return 4;   // FLOCK-YOU
+        return 5;                  // SKY SPY
+    }
+
+    // Settings bar (below mode buttons)
+    if (ty >= SEL_SET_Y - 6 && ty <= SEL_SET_Y + SEL_SET_H + 6) {
         return 99;
     }
+
     return -1;
 }
 
@@ -312,40 +318,41 @@ void display_boot_splash(const char* modeName) {
 void display_selector(int index, const char* ssid, const char* ip) {
     initScreen(SCR_SELECTOR, "SELECTOR", true);
 
-    // Header (selector uses custom header layout, redraw always in sprite mode)
-    gfx().setTextColor(C_HEADER, C_BG);
-    gfx().setTextDatum(TC_DATUM);
-    gfx().drawString("OUI-SPY SELECTOR", SCR_W / 2, 8, 2);
-    gfx().drawFastHLine(0, 35, SCR_W, C_DIM);
+    auto& g = gfx();
 
-    // Button 1: FLOCK-YOU
-    gfx().drawRect(SEL_BTN1_X, SEL_BTN_Y, SEL_BTN_W, SEL_BTN_H, C_FG);
-    gfx().setTextColor(C_FG, C_BG);
-    gfx().setTextDatum(MC_DATUM);
-    gfx().drawString("FLOCK", SEL_BTN1_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 - 15, 4);
-    gfx().drawString("YOU", SEL_BTN1_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 + 18, 4);
+    // Header
+    g.setTextColor(C_HEADER, C_BG);
+    g.setTextDatum(TC_DATUM);
+    g.drawString("OUI-SPY", SCR_W / 2, 4, 4);
+    g.drawFastHLine(0, 35, SCR_W, C_DIM);
 
-    // Button 2: SKY SPY
-    gfx().drawRect(SEL_BTN2_X, SEL_BTN_Y, SEL_BTN_W, SEL_BTN_H, C_FG);
-    gfx().setTextColor(C_FG, C_BG);
-    gfx().setTextDatum(MC_DATUM);
-    gfx().drawString("SKY", SEL_BTN2_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 - 15, 4);
-    gfx().drawString("SPY", SEL_BTN2_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 + 18, 4);
+    // Button 1: FLOCK-YOU (large, left)
+    g.drawRoundRect(SEL_BTN1_X, SEL_BTN_Y, SEL_BTN_W, SEL_BTN_H, 6, C_FG);
+    g.setTextColor(C_FG, C_BG);
+    g.setTextDatum(MC_DATUM);
+    g.drawString("FLOCK", SEL_BTN1_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 - 15, 4);
+    g.drawString("YOU", SEL_BTN1_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 + 18, 4);
 
-    // Button 3: SETTINGS
-    gfx().drawRect(SEL_BTN3_X, SEL_BTN_Y, SEL_BTN_W, SEL_BTN_H, C_DIM);
-    gfx().setTextColor(C_DIM, C_BG);
-    gfx().setTextDatum(MC_DATUM);
-    gfx().drawString("SET", SEL_BTN3_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 - 15, 4);
-    gfx().drawString("TINGS", SEL_BTN3_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 + 18, 2);
+    // Button 2: SKY SPY (large, right)
+    g.drawRoundRect(SEL_BTN2_X, SEL_BTN_Y, SEL_BTN_W, SEL_BTN_H, 6, C_FG);
+    g.setTextColor(C_FG, C_BG);
+    g.setTextDatum(MC_DATUM);
+    g.drawString("SKY", SEL_BTN2_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 - 15, 4);
+    g.drawString("SPY", SEL_BTN2_X + SEL_BTN_W / 2, SEL_BTN_Y + SEL_BTN_H / 2 + 18, 4);
+
+    // Settings bar (full-width, below mode buttons)
+    g.drawRoundRect(SEL_SET_X, SEL_SET_Y, SEL_SET_W, SEL_SET_H, 6, C_DIM);
+    g.setTextColor(C_DIM, C_BG);
+    g.setTextDatum(MC_DATUM);
+    g.drawString("SETTINGS", SEL_SET_X + SEL_SET_W / 2, SEL_SET_Y + SEL_SET_H / 2, 2);
 
     // Footer with IP and SD
-    gfx().drawFastHLine(0, FTR_Y, SCR_W, C_DIM);
-    gfx().setTextColor(C_DIM, C_BG);
-    gfx().setTextDatum(TL_DATUM);
+    g.drawFastHLine(0, FTR_Y, SCR_W, C_DIM);
+    g.setTextColor(C_DIM, C_BG);
+    g.setTextDatum(TL_DATUM);
     char foot[48];
     snprintf(foot, sizeof(foot), "IP:%s  SSID:%s", ip, ssid);
-    gfx().drawString(foot, 4, FTR_Y + 8, 2);
+    g.drawString(foot, 4, FTR_Y + 8, 2);
 
     pushSprite();
 }

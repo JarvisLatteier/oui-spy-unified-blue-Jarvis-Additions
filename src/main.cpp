@@ -1065,7 +1065,11 @@ void loop() {
                 } else {
                     int touchedMode = display_selector_touch();
                     if (touchedMode == 99) {
-                        // Enter settings
+                        // Enter settings — wait for finger release first
+                        // (prevents residual touch from hitting BACK/INCOGNITO)
+                        int16_t _tx, _ty;
+                        while (display_touch_read(_tx, _ty)) { delay(20); }
+                        delay(100);
                         inSettings = true;
                         settingsIncognito = false;
                         display_settings(displayBrightness, ledBrightness, buzzerVolume, buzzerEnabled, false);
