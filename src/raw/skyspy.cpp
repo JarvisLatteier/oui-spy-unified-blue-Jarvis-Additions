@@ -69,9 +69,17 @@ static int ssChIdx = 0;
 static int ssCurrentChannel = 6;
 static unsigned long ssChSwitchTime = 0;
 
-// Buzzer and LED toggles (shared via NVS from main selector menu)
-static bool ssBuzzerOn = true;
-static bool ssLedOn = true;
+// Per-mode display/LED/volume settings (loaded from NVS "ouispy-br")
+static uint8_t ssDispBrightness = 200;
+static uint8_t ssLedBrightness  = 50;
+static uint8_t ssVolume         = 128;
+static volatile bool ssBleOn    = true;  // BLE scan enable (NVS "ouispy-bz"/"blen")
+
+// Settings page state
+static bool ssInSettings    = false;
+static bool ssIncognito     = false;
+static uint8_t ssSavedDisp  = 200;   // saved disp/led for incognito restore
+static uint8_t ssSavedLed   = 50;
 
 // Device GPS state (CYD onboard GPS)
 #if HAS_GPS
@@ -183,20 +191,20 @@ void buzzerTask(void *parameter) {
       Serial.println("DRONE DETECTED! Playing alert sequence");
       for (int i = 0; i < 3; i++) {
 #if HAS_BUZZER
-        if (ssBuzzerOn) tone(BUZZER_PIN, DETECT_FREQ, DETECT_BEEP_DURATION);
+        if (ssVolume > 0) tone(BUZZER_PIN, DETECT_FREQ, DETECT_BEEP_DURATION);
 #endif
 #if LED_PIN >= 0
-        if (ssLedOn) digitalWrite(LED_PIN, LOW);
+        if (ssLedBrightness > 0) digitalWrite(LED_PIN, LOW);
 #endif
 #if HAS_NEOPIXEL
-        if (ssLedOn) { ledStrip_setColor(255, 0, 0); ledStrip_show(); }
+        if (ssLedBrightness > 0) { ledStrip_setColor(255, 0, 0); ledStrip_show(); }
 #endif
         vTaskDelay(pdMS_TO_TICKS(150));
 #if LED_PIN >= 0
-        if (ssLedOn) digitalWrite(LED_PIN, HIGH);
+        if (ssLedBrightness > 0) digitalWrite(LED_PIN, HIGH);
 #endif
 #if HAS_NEOPIXEL
-        if (ssLedOn) { ledStrip_clear(); ledStrip_show(); }
+        if (ssLedBrightness > 0) { ledStrip_clear(); ledStrip_show(); }
 #endif
         vTaskDelay(pdMS_TO_TICKS(50));
       }
@@ -213,20 +221,20 @@ void buzzerTask(void *parameter) {
       Serial.println("Heartbeat: Drone still in range");
       for (int hb = 0; hb < 2; hb++) {
 #if HAS_BUZZER
-        if (ssBuzzerOn) tone(BUZZER_PIN, HEARTBEAT_FREQ, HEARTBEAT_DURATION);
+        if (ssVolume > 0) tone(BUZZER_PIN, HEARTBEAT_FREQ, HEARTBEAT_DURATION);
 #endif
 #if LED_PIN >= 0
-        if (ssLedOn) digitalWrite(LED_PIN, LOW);
+        if (ssLedBrightness > 0) digitalWrite(LED_PIN, LOW);
 #endif
 #if HAS_NEOPIXEL
-        if (ssLedOn) { ledStrip_setColor(0, 0, 255); ledStrip_show(); }
+        if (ssLedBrightness > 0) { ledStrip_setColor(0, 0, 255); ledStrip_show(); }
 #endif
         vTaskDelay(pdMS_TO_TICKS(100));
 #if LED_PIN >= 0
-        if (ssLedOn) digitalWrite(LED_PIN, HIGH);
+        if (ssLedBrightness > 0) digitalWrite(LED_PIN, HIGH);
 #endif
 #if HAS_NEOPIXEL
-        if (ssLedOn) { ledStrip_clear(); ledStrip_show(); }
+        if (ssLedBrightness > 0) { ledStrip_clear(); ledStrip_show(); }
 #endif
         vTaskDelay(pdMS_TO_TICKS(50));
       }
@@ -237,7 +245,7 @@ void buzzerTask(void *parameter) {
     {
       static unsigned long lastHeartbeatLed = 0;
       unsigned long now = millis();
-      if (ssLedOn && !device_in_range && (now - lastHeartbeatLed >= 10000)) {
+      if (ssLedBrightness > 0 && !device_in_range && (now - lastHeartbeatLed >= 10000)) {
         lastHeartbeatLed = now;
         ledStrip_setBrightness(15);
         ledStrip_setColor(0, 255, 0);
@@ -245,7 +253,7 @@ void buzzerTask(void *parameter) {
         vTaskDelay(pdMS_TO_TICKS(80));
         ledStrip_clear();
         ledStrip_show();
-        ledStrip_setBrightness(50);  // restore default brightness
+        ledStrip_setBrightness(ssLedBrightness);  // restore to user setting
       }
     }
 #endif
@@ -276,9 +284,10 @@ void send_json_fast(const id_data *UAV) {
 
 void bleScanTask(void *parameter) {
   for (;;) {
-    NimBLEScanResults foundDevices = pBLEScan->start(1, false);
-    pBLEScan->clearResults();
-    // No flag checking needed - BLE callback handles buzzer triggering
+    if (ssBleOn) {
+      NimBLEScanResults foundDevices = pBLEScan->start(1, false);
+      pBLEScan->clearResults();
+    }
     delay(100);
   }
 }
@@ -433,20 +442,28 @@ void initializeBuzzer() {
 #endif
 #endif
 
-  // Read buzzer and LED toggles from shared NVS
+  // Read display/LED/volume settings from shared NVS
+  Preferences brP;
+  brP.begin("ouispy-br", true);
+  ssDispBrightness = brP.getUChar("disp", 200);
+  ssLedBrightness  = brP.getUChar("led",  50);
+  ssVolume         = brP.getUChar("vol",  128);
+  brP.end();
+
   Preferences bzP;
   bzP.begin("ouispy-bz", true);
-  ssBuzzerOn = bzP.getBool("on", true);
-  ssLedOn = bzP.getBool("led", true);
+  ssBleOn = bzP.getBool("blen", true);
   bzP.end();
 
-  Serial.printf("Buzzer initialized (%s)\n", ssBuzzerOn ? "ON" : "OFF");
+  Serial.printf("Sky Spy init: disp=%d led=%d vol=%d ble=%s\n",
+                ssDispBrightness, ssLedBrightness, ssVolume,
+                ssBleOn ? "ON" : "OFF");
 }
 
 // Close Encounters of the Third Kind - iconic 5-note motif
 // D5, E5, C5, C4, G4 — played fast and punchy
 void playCloseEncounters() {
-  if (!ssBuzzerOn) return;
+  if (ssVolume == 0) return;
 
 #if HAS_BUZZER
   // The five notes with duration in ms
@@ -461,17 +478,17 @@ void playCloseEncounters() {
   for (int i = 0; i < 5; i++) {
     tone(BUZZER_PIN, notes[i].freq, notes[i].dur);
 #if LED_PIN >= 0
-    if (ssLedOn) digitalWrite(LED_PIN, LOW);
+    if (ssLedBrightness > 0) digitalWrite(LED_PIN, LOW);
 #endif
 #if HAS_NEOPIXEL
-    if (ssLedOn) { ledStrip_setColor(0, 255, 0); ledStrip_show(); }
+    if (ssLedBrightness > 0) { ledStrip_setColor(0, 255, 0); ledStrip_show(); }
 #endif
     delay(notes[i].dur);
 #if LED_PIN >= 0
-    if (ssLedOn) digitalWrite(LED_PIN, HIGH);
+    if (ssLedBrightness > 0) digitalWrite(LED_PIN, HIGH);
 #endif
 #if HAS_NEOPIXEL
-    if (ssLedOn) { ledStrip_clear(); ledStrip_show(); }
+    if (ssLedBrightness > 0) { ledStrip_clear(); ledStrip_show(); }
 #endif
     noTone(BUZZER_PIN);
     if (notes[i].gap > 0) delay(notes[i].gap);
@@ -538,7 +555,7 @@ void setup() {
 #endif
 
 #ifdef ENABLE_TFT_DISPLAY
-  display_skyspy_scanning(0, 0, 0, 0, ssCurrentChannel, ssLedOn, ssBuzzerOn);
+  display_skyspy_scanning(0, 0, 0, 0, ssCurrentChannel);
 #endif
 }
 
@@ -572,7 +589,7 @@ static void refreshDisplay(unsigned long now) {
 #else
                    0,
 #endif
-                   ssCurrentChannel, ssLedOn, ssBuzzerOn);
+                   ssCurrentChannel);
   } else {
     display_skyspy_scanning(total,
 #if HAS_GPS
@@ -580,7 +597,7 @@ static void refreshDisplay(unsigned long now) {
 #else
                             0, 0, 0,
 #endif
-                            ssCurrentChannel, ssLedOn, ssBuzzerOn);
+                            ssCurrentChannel);
   }
 }
 #endif
@@ -622,29 +639,103 @@ void loop() {
   }
 
 #ifdef ENABLE_TFT_DISPLAY
-  // Update display every 2 seconds
+  // Update display every 2 seconds (only when not in settings)
   {
     static unsigned long lastDisplayUpdate = 0;
-    if (current_millis - lastDisplayUpdate >= 2000) {
+    if (!ssInSettings && current_millis - lastDisplayUpdate >= 2000) {
       lastDisplayUpdate = current_millis;
       refreshDisplay(current_millis);
     }
   }
 
-  // Check touch toggles (CYD only) — poll every loop for responsiveness
+  // Touch handling (CYD only) — poll every loop for responsiveness
   {
-    int touchAction = display_skyspy_touch();
-    if (touchAction == 1) {
-      ssLedOn = !ssLedOn;
-      Preferences tp; tp.begin("ouispy-bz", false);
-      tp.putBool("led", ssLedOn); tp.end();
-      if (!ssLedOn) { ledStrip_clear(); ledStrip_show(); }
-    } else if (touchAction == 2) {
-      ssBuzzerOn = !ssBuzzerOn;
-      Preferences tp; tp.begin("ouispy-bz", false);
-      tp.putBool("on", ssBuzzerOn); tp.end();
+    if (!ssInSettings) {
+      int touchAction = display_skyspy_touch();
+      if (touchAction == 1) {
+        // Wait for finger release before entering settings (prevent bleed)
+        int16_t _tx, _ty;
+        while (display_touch_read(_tx, _ty)) { delay(20); }
+        delay(100);
+        ssInSettings = true;
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      }
+    } else {
+      int touchAction = display_settings_touch();
+      if (touchAction == 1) {         // DSP +  (10% steps → 26/255)
+        ssDispBrightness = (ssDispBrightness + 26 <= 255) ? ssDispBrightness + 26 : 255;
+        display_set_brightness(ssDispBrightness);
+        Preferences p; p.begin("ouispy-br", false); p.putUChar("disp", ssDispBrightness); p.end();
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      } else if (touchAction == 2) {  // DSP -
+        ssDispBrightness = (ssDispBrightness >= 26) ? ssDispBrightness - 26 : 0;
+        display_set_brightness(ssDispBrightness);
+        Preferences p; p.begin("ouispy-br", false); p.putUChar("disp", ssDispBrightness); p.end();
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      } else if (touchAction == 3) {  // LED +
+        ssLedBrightness = (ssLedBrightness + 26 <= 255) ? ssLedBrightness + 26 : 255;
+        ledStrip_setBrightness(ssLedBrightness);
+        ledStrip_show();
+        Preferences p; p.begin("ouispy-br", false); p.putUChar("led", ssLedBrightness); p.end();
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      } else if (touchAction == 4) {  // LED -
+        ssLedBrightness = (ssLedBrightness >= 26) ? ssLedBrightness - 26 : 0;
+        if (ssLedBrightness == 0) { ledStrip_clear(); ledStrip_show(); }
+        else { ledStrip_setBrightness(ssLedBrightness); ledStrip_show(); }
+        Preferences p; p.begin("ouispy-br", false); p.putUChar("led", ssLedBrightness); p.end();
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      } else if (touchAction == 5) {  // VOL +
+        ssVolume = (ssVolume + 26 <= 255) ? ssVolume + 26 : 255;
+#ifdef BOARD_CYD_S3
+        cyd_set_volume(ssVolume);
+#endif
+        Preferences p; p.begin("ouispy-br", false); p.putUChar("vol", ssVolume); p.end();
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      } else if (touchAction == 6) {  // VOL -
+        ssVolume = (ssVolume >= 26) ? ssVolume - 26 : 0;
+#ifdef BOARD_CYD_S3
+        cyd_set_volume(ssVolume);
+#endif
+        Preferences p; p.begin("ouispy-br", false); p.putUChar("vol", ssVolume); p.end();
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      } else if (touchAction == 7) {  // BLE toggle
+        ssBleOn = !ssBleOn;
+        Preferences p; p.begin("ouispy-bz", false); p.putBool("blen", ssBleOn); p.end();
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      } else if (touchAction == 8) {  // INCOGNITO toggle
+        ssIncognito = !ssIncognito;
+        if (ssIncognito) {
+          ssSavedDisp = ssDispBrightness;
+          ssSavedLed  = ssLedBrightness;
+          display_set_brightness(0);
+          ledStrip_clear();
+          ledStrip_show();
+        } else {
+          ssDispBrightness = ssSavedDisp;
+          ssLedBrightness  = ssSavedLed;
+          display_set_brightness(ssDispBrightness);
+          ledStrip_setBrightness(ssLedBrightness);
+          ledStrip_show();
+        }
+        display_skyspy_settings(ssDispBrightness, ssLedBrightness, ssVolume, ssBleOn, ssIncognito);
+      } else if (touchAction == 9) {  // BACK
+        // Clear incognito on exit
+        if (ssIncognito) {
+          ssIncognito = false;
+          ssDispBrightness = ssSavedDisp;
+          ssLedBrightness  = ssSavedLed;
+          display_set_brightness(ssDispBrightness);
+          ledStrip_setBrightness(ssLedBrightness);
+          ledStrip_show();
+        }
+        ssInSettings = false;
+        // Wait for release to prevent touch bleeding back to main screen
+        int16_t _tx, _ty;
+        while (display_touch_read(_tx, _ty)) { delay(20); }
+        delay(100);
+        refreshDisplay(current_millis);
+      }
     }
-    if (touchAction > 0) refreshDisplay(current_millis);
   }
 #endif
 

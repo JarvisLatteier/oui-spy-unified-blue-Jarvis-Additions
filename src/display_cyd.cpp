@@ -62,12 +62,11 @@ static int  sd_files = 0;
 // Touch state
 static bool touch_ready = false;
 
-// Sky Spy toggle buttons (bottom-right of content, above footer)
+// Sky Spy settings button (bottom-left of content, above footer)
 #define SS_BTN_Y       (FTR_Y - 38)
 #define SS_BTN_H       34
-#define SS_BTN_W       74
-#define SS_LED_BTN_X   4
-#define SS_TONE_BTN_X  82
+#define SS_BTN_W       152
+#define SS_SET_BTN_X   4
 static unsigned long ssLastTouch = 0;
 #define SS_TOUCH_DEBOUNCE_MS 300
 
@@ -531,11 +530,12 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
     pushSprite();
 }
 
+static void drawSsSettingsButton();  // forward declaration
+
 void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     int alt, int rssi, int total,
                     double pilotLat, double pilotLon,
-                    int gpsSats, int wifiCh,
-                    bool ledOn, bool toneOn) {
+                    int gpsSats, int wifiCh) {
     bool layoutChanged = initScreen(SCR_SKYSPY_DRONE, "SKY SPY");
 
     auto& g = gfx();
@@ -646,7 +646,7 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
         }
     }
 
-    drawSsToggleButtons(ledOn, toneOn);
+    drawSsSettingsButton();
 
     char foot[40];
     snprintf(foot, sizeof(foot), "Total:%d BLE:ON WiFi CH:%d", total, wifiCh);
@@ -655,8 +655,7 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
 }
 
 void display_skyspy_scanning(int count, double devLat, double devLon,
-                             int gpsSats, int wifiCh,
-                             bool ledOn, bool toneOn) {
+                             int gpsSats, int wifiCh) {
     bool layoutChanged = initScreen(SCR_SKYSPY_SCAN, "SKY SPY");
 
     auto& g = gfx();
@@ -743,7 +742,7 @@ void display_skyspy_scanning(int count, double devLat, double devLon,
 #endif
     }
 
-    drawSsToggleButtons(ledOn, toneOn);
+    drawSsSettingsButton();
 
     char foot[32];
     snprintf(foot, sizeof(foot), "BLE:ON WiFi CH:%d", wifiCh);
@@ -751,28 +750,13 @@ void display_skyspy_scanning(int count, double devLat, double devLon,
     pushSprite();
 }
 
-static void drawSsToggleButtons(bool ledOn, bool toneOn) {
+static void drawSsSettingsButton() {
     auto& g = gfx();
-
-    // LED button
-    uint16_t ledCol = ledOn ? C_FG : C_DIM;
-    g.drawRoundRect(SS_LED_BTN_X, SS_BTN_Y, SS_BTN_W, SS_BTN_H, 4, ledCol);
-    g.setTextColor(ledCol, C_BG);
+    g.drawRoundRect(SS_SET_BTN_X, SS_BTN_Y, SS_BTN_W, SS_BTN_H, 4, C_FG);
+    g.fillRect(SS_SET_BTN_X + 2, SS_BTN_Y + 2, SS_BTN_W - 4, SS_BTN_H - 4, C_BG);
+    g.setTextColor(C_FG, C_BG);
     g.setTextDatum(MC_DATUM);
-    // Clear interior first
-    g.fillRect(SS_LED_BTN_X + 2, SS_BTN_Y + 2, SS_BTN_W - 4, SS_BTN_H - 4, C_BG);
-    char ledBuf[12];
-    snprintf(ledBuf, sizeof(ledBuf), "LED:%s", ledOn ? "ON" : "OFF");
-    g.drawString(ledBuf, SS_LED_BTN_X + SS_BTN_W / 2, SS_BTN_Y + SS_BTN_H / 2, 2);
-
-    // TONE button
-    uint16_t toneCol = toneOn ? C_FG : C_DIM;
-    g.drawRoundRect(SS_TONE_BTN_X, SS_BTN_Y, SS_BTN_W, SS_BTN_H, 4, toneCol);
-    g.setTextColor(toneCol, C_BG);
-    g.fillRect(SS_TONE_BTN_X + 2, SS_BTN_Y + 2, SS_BTN_W - 4, SS_BTN_H - 4, C_BG);
-    char toneBuf[12];
-    snprintf(toneBuf, sizeof(toneBuf), "TONE:%s", toneOn ? "ON" : "OFF");
-    g.drawString(toneBuf, SS_TONE_BTN_X + SS_BTN_W / 2, SS_BTN_Y + SS_BTN_H / 2, 2);
+    g.drawString("SETTINGS", SS_SET_BTN_X + SS_BTN_W / 2, SS_BTN_Y + SS_BTN_H / 2, 2);
 }
 
 int display_skyspy_touch() {
@@ -781,11 +765,10 @@ int display_skyspy_touch() {
     if (millis() - ssLastTouch < SS_TOUCH_DEBOUNCE_MS) return 0;
     ssLastTouch = millis();
 
-    // Check if touch is in toggle button region (6px padding for easier tapping)
+    // Check SETTINGS button (6px padding for easier tapping)
     const int pad = 6;
     if (ty >= SS_BTN_Y - pad && ty <= SS_BTN_Y + SS_BTN_H + pad) {
-        if (tx >= SS_LED_BTN_X - pad && tx <= SS_LED_BTN_X + SS_BTN_W + pad) return 1;
-        if (tx >= SS_TONE_BTN_X - pad && tx <= SS_TONE_BTN_X + SS_BTN_W + pad) return 2;
+        if (tx >= SS_SET_BTN_X - pad && tx <= SS_SET_BTN_X + SS_BTN_W + pad) return 1;
     }
     return 0;
 }
@@ -814,9 +797,7 @@ void display_set_brightness(uint8_t level) {
     }
 }
 
-// ---------- settings page ---------------------------------------------------
-
-// Settings layout constants
+// Settings layout constants (shared by Sky Spy and selector settings pages)
 #define SET_ROW_Y      50
 #define SET_ROW_H      30
 #define SET_BAR_X      90
@@ -827,6 +808,80 @@ void display_set_brightness(uint8_t level) {
 #define SET_BTN_H      22
 #define SET_MINUS_X    248
 #define SET_PLUS_X     280
+
+void display_skyspy_settings(uint8_t dispBr, uint8_t ledBr, uint8_t vol,
+                             bool bleOn, bool incognito) {
+    // Force full screen clear in non-sprite mode so bars don't ghost
+    if (!spriteOk) currentScreen = SCR_NONE;
+    initScreen(SCR_SETTINGS, "SETTINGS", true);
+
+    gfx().setTextColor(C_HEADER, C_BG);
+    gfx().setTextDatum(TC_DATUM);
+    gfx().drawString("SETTINGS", SCR_W / 2, 8, 2);
+    gfx().drawFastHLine(0, 35, SCR_W, C_DIM);
+
+    auto drawBar = [&](int y, const char* label, uint8_t val) {
+        int pct = (int)roundf(val * 100.0f / 255.0f);
+        int barFill = (int)((float)val / 255.0f * SET_BAR_W);
+        gfx().setTextColor(C_FG, C_BG);
+        gfx().setTextDatum(TL_DATUM);
+        gfx().drawString(label, 8, y + 4, 2);
+        // Clear bar interior before drawing (prevents ghost in direct-TFT mode)
+        gfx().fillRect(SET_BAR_X + 1, y + 3, SET_BAR_W - 2, SET_BAR_H - 2, C_BG);
+        gfx().drawRect(SET_BAR_X, y + 2, SET_BAR_W, SET_BAR_H, C_DIM);
+        if (barFill > 0) gfx().fillRect(SET_BAR_X, y + 2, barFill, SET_BAR_H, C_FG);
+        // Clear value area then draw percentage
+        gfx().fillRect(SET_VAL_X, y, 40, SET_ROW_H - 2, C_BG);
+        char vBuf[8];
+        snprintf(vBuf, sizeof(vBuf), "%d%%", pct);
+        gfx().drawString(vBuf, SET_VAL_X, y + 4, 2);
+        // +/- buttons
+        gfx().drawRect(SET_MINUS_X, y, SET_BTN_W, SET_BTN_H, C_FG);
+        gfx().setTextDatum(MC_DATUM);
+        gfx().drawString("-", SET_MINUS_X + SET_BTN_W / 2, y + SET_BTN_H / 2, 2);
+        gfx().drawRect(SET_PLUS_X, y, SET_BTN_W, SET_BTN_H, C_FG);
+        gfx().drawString("+", SET_PLUS_X + SET_BTN_W / 2, y + SET_BTN_H / 2, 2);
+    };
+
+    // Row 0: DISPLAY brightness
+    int y = SET_ROW_Y;
+    drawBar(y, "DISPLAY", dispBr);
+
+    // Row 1: LED brightness
+    y += SET_ROW_H;
+    drawBar(y, "LED", ledBr);
+
+    // Row 2: VOLUME
+    y += SET_ROW_H;
+    drawBar(y, "VOLUME", vol);
+
+    // Row 3: BLE toggle
+    y += SET_ROW_H;
+    gfx().setTextDatum(TL_DATUM);
+    gfx().setTextColor(C_FG, C_BG);
+    gfx().drawString("BLE", 8, y + 4, 2);
+    gfx().fillRect(SET_BAR_X, y, 62, SET_BTN_H + 2, C_BG);
+    gfx().drawRect(SET_BAR_X, y, 60, SET_BTN_H, bleOn ? C_FG : C_DIM);
+    gfx().setTextDatum(MC_DATUM);
+    gfx().setTextColor(bleOn ? C_FG : C_DIM, C_BG);
+    gfx().drawString(bleOn ? "ON" : "OFF", SET_BAR_X + 30, y + SET_BTN_H / 2, 2);
+
+    // Row 4: INCOGNITO + BACK
+    y += SET_ROW_H + 10;
+    gfx().setTextColor(incognito ? C_WARN : C_DIM, C_BG);
+    gfx().drawRect(8, y, 100, SET_BTN_H + 4, incognito ? C_WARN : C_DIM);
+    gfx().setTextDatum(MC_DATUM);
+    gfx().drawString("INCOGNITO", 58, y + (SET_BTN_H + 4) / 2, 2);
+
+    gfx().setTextColor(C_FG, C_BG);
+    gfx().drawRect(SCR_W - 80, y, 72, SET_BTN_H + 4, C_FG);
+    gfx().setTextDatum(MC_DATUM);
+    gfx().drawString("BACK", SCR_W - 44, y + (SET_BTN_H + 4) / 2, 2);
+
+    pushSprite();
+}
+
+// ---------- selector settings page -----------------------------------------
 
 void display_settings(uint8_t dispBr, uint8_t ledBr, uint8_t vol,
                       bool buzzer, bool incognito) {
