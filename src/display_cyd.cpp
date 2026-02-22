@@ -620,8 +620,8 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
             }
 
             QRCode qr;
-            uint8_t qrData[qrcode_getBufferSize(6)];
-            qrcode_initText(&qr, qrData, 6, ECC_LOW, url);
+            uint8_t qrData[qrcode_getBufferSize(5)];
+            qrcode_initText(&qr, qrData, 5, ECC_LOW, url);
 
             int modSize = 3;
             int qrPixels = qr.size * modSize;
@@ -714,8 +714,8 @@ void display_skyspy_scanning(int count, double devLat, double devLon,
                 devLat, devLon);
 
             QRCode qr;
-            uint8_t qrData[qrcode_getBufferSize(6)];
-            qrcode_initText(&qr, qrData, 6, ECC_LOW, url);
+            uint8_t qrData[qrcode_getBufferSize(5)];
+            qrcode_initText(&qr, qrData, 5, ECC_LOW, url);
 
             int modSize = 3;
             int qrPixels = qr.size * modSize;
