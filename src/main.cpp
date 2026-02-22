@@ -24,11 +24,6 @@
 #include "cyd_audio.h"
 #endif
 
-#if HAS_GPS
-#include <TinyGPSPlus.h>
-static TinyGPSPlus gps;
-#endif
-
 // Hardware pins — sourced from board_config.h (already defined there)
 // BUZZER_PIN, LED_PIN, NEOPIXEL_PIN come from board_config.h
 
@@ -500,12 +495,6 @@ static void startSelector() {
             if (mode >= 1 && mode <= 5) {
                 Serial.printf("[OUI-SPY] USER SELECTED MODE %d - Storing and rebooting\n", mode);
 
-                // Clear reset flag so double-reset detection doesn't override on next boot
-                Preferences resetPrefs;
-                resetPrefs.begin("ouispy-rst", false);
-                resetPrefs.putBool("flag", false);
-                resetPrefs.end();
-
                 // Write mode to NVS
                 prefs.begin("unified-mode", false);
                 prefs.putInt("mode", mode);
@@ -720,7 +709,7 @@ void setup() {
     // Initialize SD card logging
     sdlog_init();
 
-    // Initialize GPS (CYD only)
+    // Initialize GPS UART (CYD only) — flockyou.cpp reads Serial0 directly
 #if HAS_GPS
     Serial0.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
     Serial.println("[OUI-SPY] GPS initialized on UART0");
@@ -902,12 +891,6 @@ static void checkBootButtonLoop() {
                 }
 #endif
 
-                // Clear reset flag
-                Preferences resetPrefs;
-                resetPrefs.begin("ouispy-rst", false);
-                resetPrefs.putBool("flag", false);
-                resetPrefs.end();
-
                 // Store selected mode and reboot
                 prefs.begin("unified-mode", false);
                 prefs.putInt("mode", selectedMode);
@@ -1076,11 +1059,6 @@ void loop() {
                     } else if (touchedMode > 0) {
                         display_boot_splash(touchedMode == 4 ? "FLOCK-YOU" : "SKY SPY");
                         // Store and reboot into selected mode
-                        Preferences resetPrefs;
-                        resetPrefs.begin("ouispy-rst", false);
-                        resetPrefs.putBool("flag", false);
-                        resetPrefs.end();
-
                         prefs.begin("unified-mode", false);
                         prefs.putInt("mode", touchedMode);
                         prefs.end();

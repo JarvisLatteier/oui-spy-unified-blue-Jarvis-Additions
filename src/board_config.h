@@ -49,7 +49,7 @@
 #define APA102_DATA_PIN   40
 #define APA102_CLOCK_PIN  39
 
-// LEDC channel allocation: ch0=backlight(display.cpp), ch0=buzzer (no conflict, buzzer disabled)
+// LEDC channel allocation: ch0=backlight (display.cpp), buzzer disabled on T-Dongle
 #define BUZZER_LEDC_CH  0
 
 // TFT display (configured via TFT_eSPI build flags, listed here for reference)
@@ -101,7 +101,7 @@
 // Speaker amplifier enable (active-LOW per Freenove examples: LOW=on, HIGH=off)
 #define SPEAKER_EN_PIN  1
 
-// LEDC channel allocation: ch0=backlight(display_cyd.cpp), ch1=buzzer
+// LEDC channel allocation: ch2=backlight (display_cyd.cpp), ch1=buzzer
 #define BUZZER_LEDC_CH  1
 
 // SD_MMC pins (4-bit mode)

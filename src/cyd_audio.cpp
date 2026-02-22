@@ -70,7 +70,7 @@ static void toneTask(void* param) {
 
             // Generate sine wave
             float phaseInc = (float)_toneFreq / (float)AUDIO_SAMPLE_RATE;
-            float amplitude = (float)_volume / 255.0f * 24000.0f; // ~75% of int16 max
+            float amplitude = (float)_volume / 255.0f * 24000.0f; // ~73% of int16 max
 
             for (int i = 0; i < AUDIO_BUF_SAMPLES; i++) {
                 int idx = (int)(phase * 256.0f) & 0xFF;
@@ -111,7 +111,7 @@ void cyd_audio_init() {
     i2s_config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
     i2s_config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
     i2s_config.dma_buf_count = 8;
-    i2s_config.dma_buf_len = 64;
+    i2s_config.dma_buf_len = AUDIO_BUF_SAMPLES;
     i2s_config.use_apll = false;
     i2s_config.tx_desc_auto_clear = true;
     i2s_config.mclk_multiple = I2S_MCLK_MULTIPLE_256;
