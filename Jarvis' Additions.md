@@ -486,4 +486,4 @@ All three environments build successfully with all changes:
 |-------------|-----|-------|
 | `seeed_xiao_esp32s3` | 25.3% | 18.0% |
 | `lilygo_tdongle_s3` | 25.9% | 19.4% |
-| `freenove_cyd_s3` | 26.5% | 19.0% |
+| `freenove_cyd_s3` | 26.4% | 19.0% |

@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./sync.sh           Sync all repos + build
-#   ./sync.sh 3         Sync only mode 3 (UniPwn) + build
+#   ./sync.sh 2         Sync only mode 2 (Foxhunter) + build
 #   ./sync.sh status    Just check what's changed (no build)
 # ============================================================================
 
@@ -17,8 +17,8 @@ PIO="$HOME/.platformio/penv/bin/pio"
 RED=$'\e[0;31m'; GREEN=$'\e[0;32m'; YELLOW=$'\e[1;33m'
 BLUE=$'\e[0;34m'; CYAN=$'\e[0;36m'; BOLD=$'\e[1m'; NC=$'\e[0m'
 
-repo_dir()  { case $1 in 1) echo "ouispy-detector";; 2) echo "ouispy-foxhunter";; 3) echo "Oui-Spy-UniPwn";; 4) echo "flock-you";; 5) echo "Sky-Spy";; esac }
-mode_name() { case $1 in 1) echo "Detector";; 2) echo "Foxhunter";; 3) echo "UniPwn";; 4) echo "Flock-You";; 5) echo "Sky Spy";; esac }
+repo_dir()  { case $1 in 1) echo "ouispy-detector";; 2) echo "ouispy-foxhunter";; 4) echo "flock-you";; 5) echo "Sky-Spy";; esac }
+mode_name() { case $1 in 1) echo "Detector";; 2) echo "Foxhunter";; 4) echo "Flock-You";; 5) echo "Sky Spy";; esac }
 
 sync_mode() {
     local m=$1
@@ -41,13 +41,6 @@ sync_mode() {
     case $m in
         1) cp "$rp/src/main.cpp" "$RAW_DIR/detector.cpp" ;;
         2) cp "$rp/src/main.cpp" "$RAW_DIR/foxhunter.cpp" ;;
-        3)
-            cp "$rp/src/config.h"              "$RAW_DIR/config.h"
-            cp "$rp/src/unipwn-oui-spy.ino"    "$RAW_DIR/unipwn_main.cpp"
-            cp "$rp/src/exploitation.ino"       "$RAW_DIR/unipwn_exploit.cpp"
-            cp "$rp/src/hardware_feedback.ino"  "$RAW_DIR/unipwn_hardware.cpp"
-            cp "$rp/src/web_interface.ino"      "$RAW_DIR/unipwn_web.cpp"
-            ;;
         4) cp "$rp/src/main.cpp" "$RAW_DIR/flockyou.cpp" ;;
         5)
             cp "$rp/src/main.cpp"       "$RAW_DIR/skyspy.cpp"
@@ -71,9 +64,6 @@ check_mode() {
     case $m in
         1) diff -q "$rp/src/main.cpp" "$RAW_DIR/detector.cpp" &>/dev/null || changed=1 ;;
         2) diff -q "$rp/src/main.cpp" "$RAW_DIR/foxhunter.cpp" &>/dev/null || changed=1 ;;
-        3) for p in "config.h:config.h" "unipwn-oui-spy.ino:unipwn_main.cpp" "exploitation.ino:unipwn_exploit.cpp" "hardware_feedback.ino:unipwn_hardware.cpp" "web_interface.ino:unipwn_web.cpp"; do
-               diff -q "$rp/src/${p%%:*}" "$RAW_DIR/${p##*:}" &>/dev/null || changed=1
-           done ;;
         4) diff -q "$rp/src/main.cpp" "$RAW_DIR/flockyou.cpp" &>/dev/null || changed=1 ;;
         5) diff -q "$rp/src/main.cpp" "$RAW_DIR/skyspy.cpp" &>/dev/null || changed=1
            for f in opendroneid.h opendroneid.c odid_wifi.h wifi.c; do
@@ -98,9 +88,9 @@ case "${1:-sync}" in
     status)
         echo "${YELLOW}Checking...${NC}"
         echo ""
-        for m in 1 2 3 4 5; do check_mode $m; done
+        for m in 1 2 4 5; do check_mode $m; done
         ;;
-    [1-5])
+    [1245])
         echo "${GREEN}Syncing mode $1...${NC}"
         echo ""
         sync_mode $1
@@ -111,7 +101,7 @@ case "${1:-sync}" in
     *)
         echo "${GREEN}Syncing all firmwares...${NC}"
         echo ""
-        for m in 1 2 3 4 5; do sync_mode $m; done
+        for m in 1 2 4 5; do sync_mode $m; done
         echo ""
         echo "${CYAN}Building...${NC}"
         cd "$SCRIPT_DIR" && $PIO run 2>&1

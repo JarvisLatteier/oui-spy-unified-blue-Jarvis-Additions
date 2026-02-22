@@ -29,6 +29,10 @@
 #include "sdlog.h"
 #include "led_strip.h"
 
+#if HAS_NEOPIXEL
+#include <Adafruit_NeoPixel.h>
+#endif
+
 #if HAS_GPS
 #include <TinyGPSPlus.h>
 #endif

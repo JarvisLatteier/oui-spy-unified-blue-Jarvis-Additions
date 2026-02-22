@@ -1,8 +1,6 @@
 #ifndef MODES_H
 #define MODES_H
 
-#include "display.h"
-
 // Mode 1: OUI Spy Detector
 void detector_setup();
 void detector_loop();

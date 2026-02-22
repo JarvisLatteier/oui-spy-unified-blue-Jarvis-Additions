@@ -158,6 +158,12 @@ static bool   fyGPSOnboard = false;  // true once hardware GPS provides a valid 
 static TinyGPSPlus fyGPS;
 #endif
 
+#if HAS_NEOPIXEL
+static Adafruit_NeoPixel fyPixel(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
+static bool fyPixelAlertMode = false;
+static unsigned long fyPixelAlertStart = 0;
+#endif
+
 // Session persistence (SPIFFS)
 #define FY_SESSION_FILE  "/session.json"
 #define FY_PREV_FILE     "/prev_session.json"
@@ -227,8 +233,82 @@ static void fyBootBeep() {
     printf("[FLOCK-YOU] *caw caw caw*\n");
 }
 
+#if HAS_NEOPIXEL
+// ============================================================================
+// NEOPIXEL EFFECTS
+// ============================================================================
+
+static void fyHsvToRgb(float h, float s, float v, uint8_t &r, uint8_t &g, uint8_t &b) {
+    float c = v * s;
+    float x = c * (1 - fabsf(fmodf(h / 60.0f, 2) - 1));
+    float m = v - c;
+    float r1 = 0, g1 = 0, b1 = 0;
+    if      (h < 60)  { r1 = c; g1 = x; }
+    else if (h < 120) { r1 = x; g1 = c; }
+    else if (h < 180) { g1 = c; b1 = x; }
+    else if (h < 240) { g1 = x; b1 = c; }
+    else if (h < 300) { r1 = x; b1 = c; }
+    else              { r1 = c; b1 = x; }
+    r = (uint8_t)((r1 + m) * 255);
+    g = (uint8_t)((g1 + m) * 255);
+    b = (uint8_t)((b1 + m) * 255);
+}
+
+// Slow purple breathing while idle
+static void fyPixelBreathing() {
+    float t = (millis() % 4000) / 4000.0f;
+    float v = 0.3f + 0.7f * (0.5f + 0.5f * sinf(t * 2 * (float)M_PI));
+    uint8_t r, g, b;
+    fyHsvToRgb(270, 1.0f, v, r, g, b);
+    fyPixel.setPixelColor(0, fyPixel.Color(r, g, b));
+    fyPixel.show();
+}
+
+// 3 rapid red/pink flashes on detection (~750ms total)
+static void fyPixelDetection() {
+    unsigned long elapsed = millis() - fyPixelAlertStart;
+    if (elapsed >= 750) {
+        fyPixelAlertMode = false;
+        fyPixel.setPixelColor(0, 0);
+        fyPixel.show();
+        return;
+    }
+    bool on = (elapsed % 250) < 150;
+    if (on) {
+        uint8_t r, g, b;
+        fyHsvToRgb(340, 0.8f, 1.0f, r, g, b);  // red-pink
+        fyPixel.setPixelColor(0, fyPixel.Color(r, g, b));
+    } else {
+        fyPixel.setPixelColor(0, 0);
+    }
+    fyPixel.show();
+}
+
+// Dim steady pink glow while device is actively in range
+static void fyPixelHeartbeat() {
+    uint8_t r, g, b;
+    fyHsvToRgb(300, 0.7f, 0.4f, r, g, b);
+    fyPixel.setPixelColor(0, fyPixel.Color(r, g, b));
+    fyPixel.show();
+}
+
+static void fyUpdatePixel() {
+    if (fyPixelAlertMode) {
+        fyPixelDetection();
+    } else if (fyDeviceInRange) {
+        fyPixelHeartbeat();
+    } else {
+        fyPixelBreathing();
+    }
+}
+#endif  // HAS_NEOPIXEL
+
 static void fyDetectBeep() {
     printf("[FLOCK-YOU] Detection alert!\n");
+#if HAS_NEOPIXEL
+    fyPixelAlertMode = true;
+    fyPixelAlertStart = millis();
+#endif
     if (!fyBuzzerOn) return;
     // Alarm crow: two sharp ascending chirps then a caw
     fyCaw(400, 900, 100, 30);   // rising alarm chirp
@@ -837,6 +917,13 @@ static void fySetupServer() {
     // API: Receive GPS from phone browser
     fyServer.on("/api/gps", HTTP_GET, [](AsyncWebServerRequest *r) {
         if (r->hasParam("lat") && r->hasParam("lon")) {
+#if HAS_GPS
+            // Hardware GPS takes priority — ignore phone GPS once onboard fix acquired
+            if (fyGPSOnboard) {
+                r->send(200, "application/json", "{\"status\":\"ignored\",\"reason\":\"hw_gps_active\"}");
+                return;
+            }
+#endif
             fyGPSLat = r->getParam("lat")->value().toDouble();
             fyGPSLon = r->getParam("lon")->value().toDouble();
             fyGPSAcc = r->hasParam("acc") ? r->getParam("acc")->value().toFloat() : 0;
@@ -1057,6 +1144,19 @@ void setup() {
 #endif
 #endif
 
+#if HAS_NEOPIXEL
+    fyPixel.begin();
+    fyPixel.setBrightness(50);
+    fyPixel.setPixelColor(0, fyPixel.Color(236, 72, 153));  // pink boot flash
+    fyPixel.show();
+    delay(400);
+    fyPixel.setPixelColor(0, fyPixel.Color(139, 92, 246));  // purple settle
+    fyPixel.show();
+    delay(400);
+    fyPixel.clear();
+    fyPixel.show();
+#endif
+
     fyMutex = xSemaphoreCreateMutex();
 
     // GPS Serial0 already initialized in main.cpp setup()
@@ -1131,6 +1231,10 @@ void loop() {
             }
         }
     }
+#endif
+
+#if HAS_NEOPIXEL
+    fyUpdatePixel();
 #endif
 
     // BLE scanning cycle

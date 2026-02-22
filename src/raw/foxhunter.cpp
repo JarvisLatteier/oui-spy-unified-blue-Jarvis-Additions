@@ -202,7 +202,6 @@ void handleProximityBeeping() {
 #endif
         ledOn();
         isBeeping = true;
-        Serial.println("DEBUG: Solid beep mode");
         return;
     }
 
@@ -218,7 +217,6 @@ void handleProximityBeeping() {
 #endif
             ledOff();
             isBeeping = false;
-            Serial.println("DEBUG: Beep OFF");
         }
     } else {
         // Check if it's time for next beep
@@ -233,10 +231,6 @@ void handleProximityBeeping() {
             ledOn();
             isBeeping = true;
             lastBeepStart = currentTime;
-            Serial.print("DEBUG: Beep ON, RSSI: ");
-            Serial.print(currentRSSI);
-            Serial.print(", interval: ");
-            Serial.println(beepInterval);
         }
     }
 }
@@ -961,8 +955,6 @@ class MyAdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
             // Set flags for main loop to handle
             targetDetected = true;
             newTargetDetected = true;
-            Serial.print("DEBUG: Target detected, RSSI: ");
-            Serial.println(currentRSSI);
         }
     }
 };
