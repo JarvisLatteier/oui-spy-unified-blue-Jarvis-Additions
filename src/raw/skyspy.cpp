@@ -58,6 +58,7 @@ NimBLEScan* pBLEScan = nullptr;
 ODID_UAS_Data UAS_data;
 unsigned long last_status = 0;
 unsigned long last_heartbeat = 0;
+static unsigned long ssSessionStartMs = 0;  // set in setup(), used for track timestamps
 
 // Channel hopping state
 // Dwell 500ms on CH6 (NAN discovery), 100ms on each other channel (beacons)
@@ -413,11 +414,21 @@ void send_json_fast(const id_data *UAV) {
   snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
            UAV->mac[0], UAV->mac[1], UAV->mac[2],
            UAV->mac[3], UAV->mac[4], UAV->mac[5]);
-  char json_msg[256];
+  unsigned long t_ms = millis() - ssSessionStartMs;
+  char json_msg[320];
   snprintf(json_msg, sizeof(json_msg),
-    "{\"mac\":\"%s\",\"rssi\":%d,\"drone_lat\":%.6f,\"drone_long\":%.6f,\"drone_altitude\":%d,\"pilot_lat\":%.6f,\"pilot_long\":%.6f,\"basic_id\":\"%s\"}",
-    mac_str, UAV->rssi, UAV->lat_d, UAV->long_d, UAV->altitude_msl,
-    UAV->base_lat_d, UAV->base_long_d, UAV->uav_id);
+    "{\"t\":%lu,\"mac\":\"%s\",\"rssi\":%d"
+    ",\"drone_lat\":%.6f,\"drone_long\":%.6f"
+    ",\"drone_altitude\":%d,\"alt_agl\":%d"
+    ",\"spd\":%d,\"hdg\":%d"
+    ",\"pilot_lat\":%.6f,\"pilot_long\":%.6f"
+    ",\"basic_id\":\"%s\"}",
+    t_ms, mac_str, UAV->rssi,
+    UAV->lat_d, UAV->long_d,
+    UAV->altitude_msl, UAV->height_agl,
+    UAV->speed, UAV->heading,
+    UAV->base_lat_d, UAV->base_long_d,
+    UAV->uav_id);
   Serial.println(json_msg);
 
 #if HAS_SD_CARD
@@ -912,6 +923,7 @@ void setup() {
   ssChIdx = 0;
   ssCurrentChannel = 6;
   ssChSwitchTime = millis();
+  ssSessionStartMs = millis();
 
 #ifdef BOARD_CYD_S3
   NimBLEDevice::init("skyspy-live");
