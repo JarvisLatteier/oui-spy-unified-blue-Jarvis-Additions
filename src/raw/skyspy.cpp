@@ -69,6 +69,30 @@ static int ssChIdx = 0;
 static int ssCurrentChannel = 6;
 static unsigned long ssChSwitchTime = 0;
 
+// Live web dashboard + BLE GATT push (CYD only)
+#ifdef BOARD_CYD_S3
+static AsyncWebServer ssServer(80);
+
+// BLE GATT peripheral — Nordic UART Service (NUS), phone subscribes to drone data
+#define SS_BLE_SVC "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define SS_BLE_TX  "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+static NimBLEServer*         ssGattSrv   = nullptr;
+static NimBLECharacteristic* ssDroneChar = nullptr;
+static volatile bool         ssPhoneConn = false;
+
+class SsGattCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer*) override {
+    ssPhoneConn = true;
+    Serial.println("[SKY-SPY] BLE client connected");
+  }
+  void onDisconnect(NimBLEServer*) override {
+    ssPhoneConn = false;
+    Serial.println("[SKY-SPY] BLE client disconnected, restarting adv");
+    NimBLEDevice::startAdvertising();
+  }
+};
+#endif
+
 // Per-mode display/LED/volume settings (loaded from NVS "ouispy-br")
 static uint8_t ssDispBrightness = 200;
 static uint8_t ssLedBrightness  = 50;
@@ -631,6 +655,239 @@ void initializeLED() {
 #endif
 }
 
+// ============================================================================
+// Live web dashboard (CYD only)
+// ============================================================================
+#ifdef BOARD_CYD_S3
+
+static const char SS_HTML[] PROGMEM = R"=====(
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sky Spy</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#111;color:#0f0;font-family:monospace;font-size:14px}
+header{background:#000;border-bottom:1px solid #0a0;padding:8px 12px;display:flex;justify-content:space-between;align-items:center}
+h1{font-size:16px}#st{font-size:11px;color:#060}
+.d{background:#1a1a1a;border:1px solid #0a0;border-radius:4px;margin:8px;padding:8px}
+.id{font-size:15px;font-weight:bold}.ag{background:#0a0;color:#000;font-size:10px;padding:1px 4px;border-radius:2px;float:right}
+.r{display:flex;justify-content:space-between;margin-top:3px;font-size:12px;color:#0a0}
+.p{color:#6af}.em{text-align:center;color:#060;padding:40px 8px}
+a.mb{display:block;width:100%;margin-top:6px;padding:6px;background:#0a0;color:#000;text-align:center;text-decoration:none;border-radius:3px;font-weight:bold}
+.bt{background:#0a0a0a;border-top:1px solid #040;padding:10px 12px;margin-top:4px}
+.bth{color:#0a0;font-size:12px;margin-bottom:5px}
+.btb{font-size:11px;color:#060;line-height:1.6}
+a.btl{display:none;margin-top:8px;padding:7px 12px;background:#0a0;color:#000;text-decoration:none;border-radius:3px;font-size:12px;font-weight:bold}
+</style></head><body>
+<header><h1>&#9992; SKY SPY LIVE</h1><span id="st">connecting...</span></header>
+<div id="c"></div>
+<div class="bt">
+<div class="bth">&#128241; BLE LIVE TRACKING &mdash; keeps your internet</div>
+<div class="btb" id="btb">detecting browser...</div>
+<a href="/ble" class="btl" id="btl">&#8595; DOWNLOAD BLE PAGE</a>
+</div>
+<script>
+(function(){
+var u=navigator.userAgent;
+var ios=/iPhone|iPad|iPod/.test(u);
+var andr=/Android/.test(u);
+var chr=/Chrome\//.test(u)&&!/CriOS/.test(u)&&!/EdgA/.test(u);
+var t=document.getElementById('btb');
+var l=document.getElementById('btl');
+if(ios){
+  t.innerHTML='iOS: use <b>nRF Connect</b> or <b>LightBlue</b> app.<br>Connect to <b>skyspy-live</b> &rarr; service 6E400001 &rarr; notify 6E400003.';
+}else if(andr&&chr){
+  t.innerHTML='Download once &rarr; open from Files for live tracking with <b>full internet preserved</b>.';
+  l.style.display='inline-block';
+}else if(andr){
+  t.innerHTML='Use <b>nRF Connect</b>, or try <b>Chrome</b> to download the BLE page.';
+  l.style.display='inline-block';
+}else{
+  t.innerHTML='Download the BLE page and open in Chrome for tracking without losing internet.';
+  l.style.display='inline-block';
+}
+})();
+function ag(ms){return ms<2000?'now':ms<60000?(ms/1000|0)+'s':'old'}
+function poll(){
+  fetch('/api/live').then(r=>r.json()).then(function(d){
+    document.getElementById('st').textContent='CH:'+d.ch+' GPS:'+d.sats+'sat '+new Date().toLocaleTimeString();
+    var h='';
+    if(!d.drones||!d.drones.length){h='<div class="em">No drones detected<br><small>WiFi CH:'+d.ch+'</small></div>';}
+    else d.drones.forEach(function(u){
+      var m='https://maps.google.com/maps?q='+u.lat+','+u.lon;
+      if(u.plat&&u.plon)m='https://maps.google.com/maps?saddr='+u.plat+','+u.plon+'&daddr='+u.lat+','+u.lon;
+      h+='<div class="d"><span class="ag">'+ag(u.age)+'</span>';
+      h+='<div class="id">'+(u.id||u.mac||'?')+'</div>';
+      h+='<div class="r">DRONE: '+u.lat.toFixed(5)+', '+u.lon.toFixed(5)+'</div>';
+      h+='<div class="r"><span>ALT:'+u.alt+'m</span><span>RSSI:'+u.rssi+'</span><span>'+u.spd+'m/s '+u.hdg+'&deg;</span></div>';
+      if(u.plat&&u.plon)h+='<div class="r p">PILOT: '+u.plat.toFixed(5)+', '+u.plon.toFixed(5)+'</div>';
+      h+='<a class="mb" href="'+m+'" target="_blank">OPEN IN MAPS</a></div>';
+    });
+    document.getElementById('c').innerHTML=h;
+  }).catch(function(){document.getElementById('st').textContent='reconnecting...';});
+}
+poll();setInterval(poll,2000);
+</script></body></html>
+)=====";
+
+// Web Bluetooth client page — served at /ble; download once, open from file:// thereafter
+static const char SS_BLE_HTML[] PROGMEM = R"=====(
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sky Spy BLE</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#111;color:#0f0;font-family:monospace;font-size:14px}
+header{background:#000;border-bottom:1px solid #0a0;padding:8px 12px;display:flex;justify-content:space-between;align-items:center}
+h1{font-size:16px}#st{font-size:11px;color:#060}
+#btn{background:#0a0;color:#000;border:none;padding:10px 20px;font-family:monospace;font-size:14px;font-weight:bold;border-radius:3px;cursor:pointer;margin:12px;display:block}
+#btn:disabled{opacity:.4;cursor:default}
+.d{background:#1a1a1a;border:1px solid #0a0;border-radius:4px;margin:8px;padding:8px}
+.id{font-size:15px;font-weight:bold}.r{display:flex;justify-content:space-between;margin-top:3px;font-size:12px;color:#0a0}
+.p{color:#6af}.em{text-align:center;color:#060;padding:24px 12px;line-height:1.7}
+a.mb{display:block;width:100%;margin-top:6px;padding:6px;background:#0a0;color:#000;text-align:center;text-decoration:none;border-radius:3px;font-weight:bold}
+</style></head><body>
+<header><h1>&#9992; SKY SPY BLE</h1><span id="st">disconnected</span></header>
+<button id="btn" onclick="conn()">CONNECT BLE</button>
+<div id="c"></div>
+<script>
+var SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+var TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+var btn=document.getElementById('btn');
+var st=document.getElementById('st');
+var c=document.getElementById('c');
+if(!navigator.bluetooth){
+  btn.style.display='none';
+  var u=navigator.userAgent;
+  var ios=/iPhone|iPad|iPod/.test(u);
+  var chr=/Chrome\//.test(u)&&!/CriOS/.test(u)&&!/EdgA/.test(u);
+  var msg;
+  if(ios){
+    msg='<b>iOS does not support Web Bluetooth.</b><br><br>'+
+      'Use the free <b>nRF Connect</b> app (Nordic Semiconductor)<br>'+
+      'or <b>LightBlue</b> app (PunchThrough):<br><br>'+
+      '1. Scan &rarr; connect to <b>skyspy-live</b><br>'+
+      '2. Open service <small>6E400001-B5A3-F393...</small><br>'+
+      '3. Tap &#9660; on characteristic <small>6E400003...</small><br>'+
+      '4. Drone JSON pushes every 2 seconds.';
+  }else if(chr){
+    msg='<b>Save this page, then reopen from Files.</b><br><br>'+
+      'Web Bluetooth requires a secure context.<br>'+
+      'Chrome allows it from locally saved files.<br><br>'+
+      '1. Tap &nbsp;&#8942;&nbsp; &rarr; <b>Download page</b><br>'+
+      '2. Open <b>Files</b> app &rarr; tap <b>skyspy-ble.html</b><br>'+
+      '3. Page reopens in Chrome &rarr; tap <b>CONNECT BLE</b>.';
+  }else{
+    msg='<b>Open this page in Chrome on Android.</b><br><br>'+
+      'Then save it and reopen from the Files app.<br><br>'+
+      '<b>iOS:</b> Use <b>nRF Connect</b> or <b>LightBlue</b> app<br>'+
+      'and connect to <b>skyspy-live</b>.';
+  }
+  c.innerHTML='<div class="em">'+msg+'</div>';
+}
+function conn(){
+  st.textContent='scanning...';
+  navigator.bluetooth.requestDevice({
+    filters:[{name:'skyspy-live'}],
+    optionalServices:[SVC]
+  }).then(function(d){
+    st.textContent='connecting...';
+    d.addEventListener('gattserverdisconnected',disc);
+    return d.gatt.connect();
+  }).then(function(s){return s.getPrimaryService(SVC);})
+  .then(function(s){return s.getCharacteristic(TX);})
+  .then(function(ch){
+    return ch.startNotifications().then(function(){
+      ch.addEventListener('characteristicvaluechanged',data);
+      st.textContent='connected \u2713';
+      btn.disabled=true;
+    });
+  }).catch(function(e){st.textContent='error: '+e.message;});
+}
+function disc(){st.textContent='disconnected';btn.disabled=false;}
+function data(e){
+  try{
+    var d=JSON.parse(new TextDecoder().decode(e.target.value));
+    st.textContent='CH:'+d.ch+(d.sats?' GPS:'+d.sats+'sat':'');
+    if(!d.id){c.innerHTML='<div class="em">No drones detected<br><small>WiFi CH:'+d.ch+'</small></div>';return;}
+    var m='https://maps.google.com/maps?q='+d.lat+','+d.lon;
+    if(d.plat&&d.plon)m='https://maps.google.com/maps?saddr='+d.plat+','+d.plon+'&daddr='+d.lat+','+d.lon;
+    var h='<div class="d"><div class="id">'+(d.id||d.mac||'?')+'</div>';
+    h+='<div class="r">DRONE: '+d.lat.toFixed(5)+', '+d.lon.toFixed(5)+'</div>';
+    h+='<div class="r"><span>ALT:'+d.alt+'m</span><span>RSSI:'+d.rssi+'</span><span>'+d.spd+'m/s '+d.hdg+'&deg;</span></div>';
+    if(d.plat&&d.plon)h+='<div class="r p">PILOT: '+d.plat.toFixed(5)+', '+d.plon.toFixed(5)+'</div>';
+    h+='<a class="mb" href="'+m+'" target="_blank">OPEN IN MAPS</a></div>';
+    c.innerHTML=h;
+  }catch(e){}
+}
+</script></body></html>
+)=====";
+
+static void ssSetupGatt() {
+  NimBLEDevice::setMTU(247);
+  ssGattSrv = NimBLEDevice::createServer();
+  ssGattSrv->setCallbacks(new SsGattCallbacks());
+  NimBLEService* pSvc = ssGattSrv->createService(SS_BLE_SVC);
+  ssDroneChar = pSvc->createCharacteristic(SS_BLE_TX, NIMBLE_PROPERTY::NOTIFY);
+  pSvc->start();
+  NimBLEAdvertising* pAdv = NimBLEDevice::getAdvertising();
+  pAdv->addServiceUUID(SS_BLE_SVC);
+  pAdv->setScanResponse(false);
+  NimBLEDevice::startAdvertising();
+  Serial.println("[SKY-SPY] BLE GATT ready — connect 'skyspy-live' in nRF Connect or Web BT");
+}
+
+static void ssSetupServer() {
+  ssServer.on("/", HTTP_GET, [](AsyncWebServerRequest *r) {
+    r->send(200, "text/html", SS_HTML);
+  });
+
+  // BLE client page — download once, open from file:// for Web Bluetooth without WiFi
+  ssServer.on("/ble", HTTP_GET, [](AsyncWebServerRequest *r) {
+    AsyncWebServerResponse *resp = r->beginResponse(200, "text/html", SS_BLE_HTML);
+    resp->addHeader("Content-Disposition", "inline; filename=\"skyspy-ble.html\"");
+    r->send(resp);
+  });
+
+  ssServer.on("/api/live", HTTP_GET, [](AsyncWebServerRequest *r) {
+    AsyncResponseStream *resp = r->beginResponseStream("application/json");
+    unsigned long now = millis();
+    resp->print("{\"ch\":");
+    resp->print(ssCurrentChannel);
+    resp->print(",\"sats\":");
+#if HAS_GPS
+    resp->print(ssDevSats);
+#else
+    resp->print(0);
+#endif
+    resp->print(",\"drones\":[");
+    bool first = true;
+    for (int i = 0; i < MAX_UAVS; i++) {
+      if (uavs[i].mac[0] == 0) continue;
+      if (now - uavs[i].last_seen > 30000) continue;
+      if (!first) resp->print(',');
+      first = false;
+      char mac_str[18];
+      snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+               uavs[i].mac[0], uavs[i].mac[1], uavs[i].mac[2],
+               uavs[i].mac[3], uavs[i].mac[4], uavs[i].mac[5]);
+      resp->printf("{\"mac\":\"%s\",\"id\":\"%s\","
+                   "\"lat\":%.6f,\"lon\":%.6f,"
+                   "\"alt\":%d,\"rssi\":%d,"
+                   "\"spd\":%d,\"hdg\":%d,"
+                   "\"age\":%lu",
+                   mac_str, uavs[i].uav_id,
+                   uavs[i].lat_d, uavs[i].long_d,
+                   uavs[i].altitude_msl, uavs[i].rssi,
+                   uavs[i].speed, uavs[i].heading,
+                   now - uavs[i].last_seen);
+      if (uavs[i].base_lat_d != 0.0 || uavs[i].base_long_d != 0.0) {
+        resp->printf(",\"plat\":%.6f,\"plon\":%.6f",
+                     uavs[i].base_lat_d, uavs[i].base_long_d);
+      }
+      resp->print('}');
+    }
+    resp->print("]}");
+    r->send(resp);
+  });
+
+  ssServer.begin();
+  Serial.println("[SKY-SPY] Live dashboard: http://192.168.4.1 (skyspy-live / skyspy123)");
+}
+#endif // BOARD_CYD_S3
+
 void setup() {
   // Skip setCpuFrequencyMhz(160) — causes UART/SPI issues on CYD (TFT, touch)
   initializeSerial();
@@ -640,8 +897,14 @@ void setup() {
 
   nvs_flash_init();
 
+#ifdef BOARD_CYD_S3
+  // AP+STA: softAP on CH6 for live dashboard, promiscuous STA for drone scanning
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP("skyspy-live", "skyspy123", 6);
+#else
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+#endif
 
   esp_wifi_set_promiscuous(true);
   esp_wifi_set_promiscuous_rx_cb(&callback);
@@ -650,7 +913,12 @@ void setup() {
   ssCurrentChannel = 6;
   ssChSwitchTime = millis();
 
+#ifdef BOARD_CYD_S3
+  NimBLEDevice::init("skyspy-live");
+  ssSetupGatt();   // MUST be before getScan() / scan task start
+#else
   NimBLEDevice::init("DroneID");
+#endif
   pBLEScan = NimBLEDevice::getScan();
 
 #ifdef ENABLE_TFT_DISPLAY
@@ -661,7 +929,11 @@ void setup() {
 
   printQueue = xQueueCreate(MAX_UAVS, sizeof(id_data));
 
+#ifndef BOARD_CYD_S3
+  // CYD: BLE scan omitted — radio dedicated to GATT advertising (phone push).
+  // WiFi promiscuous mode handles drone detection on CYD.
   xTaskCreatePinnedToCore(bleScanTask, "BLEScanTask", 4096, NULL, 1, NULL, 1);
+#endif
   xTaskCreatePinnedToCore(printerTask, "PrinterTask", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(buzzerTask, "BuzzerTask", 4096, NULL, 1, NULL, 1);
   Serial.printf("[SKY-SPY] Ready, heap: %u bytes\n", ESP.getFreeHeap());
@@ -677,6 +949,10 @@ void setup() {
 
 #if HAS_SD_CARD
   ssRegistryLoad();
+#endif
+
+#ifdef BOARD_CYD_S3
+  ssSetupServer();
 #endif
 
 #ifdef ENABLE_TFT_DISPLAY
@@ -728,6 +1004,31 @@ static void refreshDisplay(unsigned long now) {
                    0,
 #endif
                    ssCurrentChannel, sessionsSeen);
+#ifdef BOARD_CYD_S3
+    if (ssPhoneConn && ssDroneChar) {
+      char notif[220];
+      snprintf(notif, sizeof(notif),
+               "{\"id\":\"%s\",\"mac\":\"%s\","
+               "\"lat\":%.6f,\"lon\":%.6f,"
+               "\"alt\":%d,\"rssi\":%d,\"spd\":%d,\"hdg\":%d,"
+               "\"plat\":%.6f,\"plon\":%.6f,"
+               "\"ch\":%d,\"sats\":%d}",
+               uavs[bestIdx].uav_id, mac_str,
+               uavs[bestIdx].lat_d, uavs[bestIdx].long_d,
+               uavs[bestIdx].altitude_msl, uavs[bestIdx].rssi,
+               uavs[bestIdx].speed, uavs[bestIdx].heading,
+               uavs[bestIdx].base_lat_d, uavs[bestIdx].base_long_d,
+               ssCurrentChannel,
+#if HAS_GPS
+               ssDevSats
+#else
+               0
+#endif
+      );
+      ssDroneChar->setValue((uint8_t*)notif, strlen(notif));
+      ssDroneChar->notify();
+    }
+#endif
   } else {
     display_skyspy_scanning(total,
 #if HAS_GPS
@@ -736,6 +1037,21 @@ static void refreshDisplay(unsigned long now) {
                             0, 0, 0,
 #endif
                             ssCurrentChannel);
+#ifdef BOARD_CYD_S3
+    if (ssPhoneConn && ssDroneChar) {
+      char notif[48];
+      snprintf(notif, sizeof(notif), "{\"id\":\"\",\"ch\":%d,\"sats\":%d}",
+               ssCurrentChannel,
+#if HAS_GPS
+               ssDevSats
+#else
+               0
+#endif
+      );
+      ssDroneChar->setValue((uint8_t*)notif, strlen(notif));
+      ssDroneChar->notify();
+    }
+#endif
   }
 }
 #endif

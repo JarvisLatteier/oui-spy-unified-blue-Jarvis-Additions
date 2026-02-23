@@ -24,7 +24,7 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
                       const char* method, int rssi, int gpsSats = 0,
                       const char* name = nullptr, int sightings = 0,
                       bool isRaven = false, const char* ravenFW = nullptr,
-                      bool gpsTagged = false);
+                      bool gpsTagged = false, const char* alias = nullptr);
 void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     int alt, int rssi, int total,
                     double pilotLat = 0, double pilotLon = 0,
@@ -67,7 +67,7 @@ inline void display_foxhunter(int, const char*, bool, const char*) {}
 inline void display_flockyou(int, int, bool, const char*, const char*, int,
                              int = 0, const char* = nullptr, int = 0,
                              bool = false, const char* = nullptr,
-                             bool = false) {}
+                             bool = false, const char* = nullptr) {}
 inline void display_skyspy(const char*, const char*, double, double,
                            int, int, int,
                            double = 0, double = 0, int = 0, int = 6, int = 0) {}

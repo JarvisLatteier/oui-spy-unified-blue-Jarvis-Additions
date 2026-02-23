@@ -12,6 +12,8 @@
 | LILYGO T-Dongle-S3 | All (1, 2, 4, 5) | 0.96" ST7735 (160x80) | BOOT button, APA102 LED, SD card |
 | Freenove ESP32-S3 CYD | Flock-You (4), Sky Spy (5) | 2.8" ILI9341 (320x240) touch | Touch screen, BOOT button, NeoPixel, speaker, SD card, GPS |
 
+> 📷 **[Photo: all three boards side by side — XIAO, T-Dongle, and CYD]**
+
 ## Getting Started
 
 ### First Boot
@@ -47,10 +49,12 @@ On first power-up the device enters **Selector Mode** (mode 0). From here you ch
 
 ### CYD (Touch Screen)
 
-The CYD shows 3 touch buttons:
+The CYD shows 3 large touch buttons:
 - **FLOCK-YOU** — tap to boot into Flock-You mode
 - **SKY SPY** — tap to boot into Sky Spy mode
 - **SETTINGS** — brightness, volume, buzzer, and incognito controls
+
+> 📷 **[Photo: CYD selector screen showing the three touch buttons]**
 
 **Settings page controls:**
 - **DSP +/-** — display backlight brightness
@@ -59,6 +63,8 @@ The CYD shows 3 touch buttons:
 - **BZR** — buzzer enable/disable toggle
 - **INCOGNITO** — kills display and LED
 - **BACK** — return to mode selector
+
+> 📷 **[Photo: CYD settings page with all sliders and toggles]**
 
 All settings persist across reboots.
 
@@ -97,6 +103,8 @@ Track down a single BLE device using RSSI signal strength — beeps get faster a
 
 **T-Dongle display** shows a large RSSI number with a color-coded proximity bar (red → yellow → green).
 
+> 📷 **[Photo: T-Dongle display showing Foxhunter RSSI bar and signal strength]**
+
 If no configuration is entered within 20 seconds, Foxhunter auto-switches to tracking mode with the last saved target.
 
 ## Mode 4: Flock-You
@@ -117,13 +125,43 @@ Detects Flock Safety surveillance cameras and Raven gunshot detectors via BLE.
 - Detection statistics and Raven count
 - **Export options**: JSON, CSV, or KML (for Google Earth)
 - Session history with archiving
+- **History tab** — persistent cross-session device registry
 - GPS wardriving — your phone's browser can share its location via the dashboard, tagging each detection with coordinates
+
+> 📷 **[Photo: Flock-You web dashboard main detection tab]**
+
+> 📷 **[Photo: Flock-You web dashboard HIST tab showing persistent registry]**
 
 **GPS (CYD only):** The onboard GPS module automatically tags detections with coordinates without needing a phone.
 
+### CYD Detection Display
+
+The CYD shows each detection with a **NEW** or **×N** badge:
+- **NEW** (yellow) — first time this camera has been seen across all sessions
+- **×N** (dim) — camera has been seen N total times in previous sessions
+
+> 📷 **[Photo: CYD showing a Flock-You detection with NEW badge]**
+
+### Persistent Device Registry
+
+Flock-You maintains a cross-session camera database on the SD card at `/oui-spy/flockyou/registry.json`. This lets you build a picture of camera density in an area over multiple sessions.
+
+**Per-device record:**
+- MAC address (primary key)
+- Device type (`flock` or `raven`)
+- Total lifetime sightings
+- GPS coordinates (if available)
+- First seen / last seen timestamps
+
+**How it works:**
+- Registry loads at mode startup; new detections update it in memory and write to SD
+- Writes are atomic: temporary file written first, then renamed over the live registry
+- Registry capped at ~1000 entries; oldest (by last_seen) are evicted if over limit
+- Web dashboard exposes `/api/registry` — the HIST tab uses this to display the full history
+
 ## Mode 5: Sky Spy
 
-Monitors for FAA Remote ID (Open Drone ID) broadcasts from drones over WiFi and BLE. No WiFi AP is created — this mode is passive.
+Monitors for FAA Remote ID (Open Drone ID) broadcasts from drones over WiFi and BLE.
 
 **What it detects:**
 - DJI drones (OcuSync 3.0+) and all FAA-compliant commercial UAVs
@@ -142,6 +180,89 @@ Monitors for FAA Remote ID (Open Drone ID) broadcasts from drones over WiFi and 
 - NeoPixel flashes red (if LED enabled)
 - Footer updates to `Total:N BLE:ON WiFi CH:N`
 
+### CYD Sky Spy — Scanning Screen
+
+When no drone is active the CYD scanning screen shows:
+- Left half: scan stats, drone count, GPS coordinates (when GPS fix acquired)
+- Right half: **LIVE MAP QR** — scan to connect and open the live drone dashboard
+
+> 📷 **[Photo: CYD Sky Spy scanning screen with LIVE MAP QR in right panel]**
+
+### CYD Sky Spy — Drone Detected Screen
+
+When a drone is detected:
+- Drone ID, MAC, altitude, RSSI, and GPS coordinates fill the left panel
+- Right panel shows a **Google Maps QR code** — scan to open turn-by-turn directions from pilot launch point to current drone position (or single drone pin if no pilot data)
+- **NEW DRONE** (yellow) / **×N REPEAT** (dim) badge indicates whether this operator has been seen before across sessions
+
+> 📷 **[Photo: CYD Sky Spy drone detected screen with NEW or REPEAT badge]**
+
+### CYD Live Tracking — WiFi Dashboard
+
+The CYD creates a WiFi access point **skyspy-live** (password: `skyspy123`) on channel 6 alongside drone scanning. Connect your phone and open `http://192.168.4.1` to see a live auto-refreshing drone dashboard.
+
+**The dashboard shows:**
+- All drones seen in the last 30 seconds with ID, MAC, altitude, RSSI, speed, heading
+- Pilot launch position (blue) when available
+- **OPEN IN MAPS** button → Google Maps directions from pilot to drone
+- Current WiFi channel and GPS satellite count in the header
+
+**Note — phone loses internet while connected to skyspy-live** because the ESP32 AP has no upstream internet. Two options:
+
+- **Android:** After joining, tap the "No internet" notification → **Stay connected**. Your phone will use cellular data for internet while talking to the ESP32 over WiFi.
+- **iOS:** Go to Settings → Wi-Fi → tap `ⓘ` next to **skyspy-live** → **Use Without Internet**. This persists until you forget the network.
+
+> 📷 **[Photo: Sky Spy live dashboard on phone browser showing drone card with OPEN IN MAPS]**
+
+### CYD Live Tracking — BLE Push (recommended: no internet interruption)
+
+The CYD also runs a **BLE GATT peripheral** (Nordic UART Service) named **skyspy-live** that pushes drone data directly to your phone every 2 seconds over Bluetooth — no WiFi required, your phone keeps its internet connection the entire time.
+
+**BLE payload** is a JSON notification pushed on every refresh:
+```json
+{"id":"UA12345","mac":"aa:bb:cc:dd:ee:ff","lat":34.1234,"lon":-118.1234,
+ "alt":100,"rssi":-65,"spd":5,"hdg":270,"plat":34.1235,"plon":-118.1235,"ch":6,"sats":8}
+```
+When no drone is present: `{"id":"","ch":6,"sats":8}`
+
+#### Android — Web Bluetooth (recommended)
+
+The CYD serves a Web Bluetooth client page at `http://192.168.4.1/ble`. Download it once while connected to the WiFi AP, then use it forever from local storage without any WiFi connection.
+
+1. Connect your phone to **skyspy-live** WiFi
+2. Open `http://192.168.4.1/ble` in **Chrome**
+3. Use Chrome's menu (⋮) → **Download** to save `skyspy-ble.html` to your phone
+4. Disconnect from skyspy-live WiFi — your internet is restored
+5. Open the **Files** app → tap `skyspy-ble.html` → opens in Chrome
+6. Tap **CONNECT BLE** → select **skyspy-live** from the picker
+7. Drone data appears and updates live; tap **OPEN IN MAPS** for Google Maps directions
+
+> 📷 **[Photo: Sky Spy BLE web page on Android showing drone card with OPEN IN MAPS]**
+
+#### iOS — nRF Connect or LightBlue
+
+Web Bluetooth is not supported in iOS Safari. Use the free **nRF Connect** (Nordic Semiconductor) or **LightBlue** (PunchThrough) app:
+
+1. Open **nRF Connect** → **Scanner** tab → find **skyspy-live**
+2. Tap **Connect**
+3. Expand **Unknown Service** (UUID: `6E400001-...`)
+4. Find characteristic `6E400003-...` (TX — ESP32 → phone)
+5. Tap the **▼ (subscribe)** or **notify** button
+6. Drone JSON data appears in the notification log every 2 seconds
+7. Copy coordinates from the JSON and paste into Maps manually
+
+> 📷 **[Photo: nRF Connect app showing skyspy-live connected with drone JSON notification]**
+
+#### BLE Service Details
+
+| Field | Value |
+|-------|-------|
+| Device name | `skyspy-live` |
+| Service UUID | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` (Nordic UART) |
+| TX Characteristic | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` (notify, ESP32→phone) |
+| Update rate | Every 2 seconds |
+| MTU | 247 bytes |
+
 ### CYD Touch Controls (Sky Spy)
 
 Two toggle buttons appear on the CYD display:
@@ -157,6 +278,25 @@ Both settings persist across reboots.
 | Idle | Dim green heartbeat every 10 seconds |
 | Boot | Green flash |
 
+### Persistent Drone Registry
+
+Sky Spy maintains a cross-session drone operator database on the SD card at `/oui-spy/skyspy/registry.json`.
+
+**Per-operator record:**
+- UAS ID (FAA-assigned, primary key — stable across flights)
+- Operator ID
+- Sessions seen (count of separate power-cycle detection sessions)
+- First seen / last seen timestamps
+- Pilot location centroid (averaged across all sessions)
+- Most recent pilot launch location
+- Last seen BLE MAC
+
+**How it works:**
+- Registry loads at mode startup
+- First detection of an operator per session increments their session count and updates the centroid
+- Write-back is atomic (tmp → rename) and only triggered on new entries or new session detections, not every display refresh
+- The **×N** badge on the CYD drone screen shows how many separate sessions this operator has been seen in — after a few passes in an area, repeat operators become obvious immediately
+
 ## SD Card Logging
 
 The T-Dongle and CYD support SD card logging. Insert a FAT32-formatted micro SD card (up to 64GB tested).
@@ -166,13 +306,18 @@ The T-Dongle and CYD support SD card logging. Insert a FAT32-formatted micro SD 
 /oui-spy/
   detector/session_000001.jsonl
   foxhunter/session_000001.jsonl
-  flockyou/session_000001.jsonl
-  skyspy/session_000001.jsonl
+  flockyou/
+    session_000001.jsonl
+    registry.json
+  skyspy/
+    session_000001.jsonl
+    registry.json
 ```
 
 - Logs are JSONL format (one JSON object per line)
 - Session numbers auto-increment each boot
 - Files are only created when a detection occurs (no empty files)
+- `registry.json` files are persistent cross-session databases (see Flock-You and Sky Spy sections above)
 - Display footer shows `SD:OK / Files:N` with per-mode file count
 
 **Accessing logs:**
@@ -181,7 +326,7 @@ The T-Dongle and CYD support SD card logging. Insert a FAT32-formatted micro SD 
   - `http://192.168.4.1/sd/list` — list all log files as JSON
   - `http://192.168.4.1/sd/download?file=skyspy/session_000001.jsonl` — download a file
   - `http://192.168.4.1/sd/clear?confirm=yes` — delete all logs
-- In Flock-You mode: use the dashboard export buttons (JSON/CSV/KML)
+- In Flock-You mode: use the dashboard export buttons (JSON/CSV/KML) or the HIST tab for registry data
 
 ## Privacy Features
 
@@ -191,15 +336,16 @@ The T-Dongle and CYD support SD card logging. Insert a FAT32-formatted micro SD 
 
 ## AP Credentials Quick Reference
 
-| Mode | Default SSID | Default Password | IP Address |
-|------|-------------|-----------------|------------|
-| Selector | oui-spy | ouispy123 | 192.168.4.1 |
-| Detector | snoopuntothem | astheysnoopuntous | 192.168.4.1 |
-| Foxhunter | foxhunter | foxhunter | 192.168.4.1 |
-| Flock-You | flockyou | flockyou123 | 192.168.4.1 |
-| Sky Spy | *(none — no AP)* | — | — |
+| Mode | Default SSID | Default Password | IP Address | Notes |
+|------|-------------|-----------------|------------|-------|
+| Selector | oui-spy | ouispy123 | 192.168.4.1 | SSID/password configurable via web UI |
+| Detector | snoopuntothem | astheysnoopuntous | 192.168.4.1 | |
+| Foxhunter | foxhunter | foxhunter | 192.168.4.1 | |
+| Flock-You | flockyou | flockyou123 | 192.168.4.1 | |
+| Sky Spy (CYD) | skyspy-live | skyspy123 | 192.168.4.1 | WiFi dashboard + BLE GATT push |
+| Sky Spy (XIAO/T-Dongle) | *(none)* | — | — | Passive scanning only |
 
-The Selector AP SSID and password can be customized via the web UI or CYD settings.
+**Sky Spy CYD also advertises as a BLE peripheral** named `skyspy-live`. Connecting via BLE (nRF Connect on iOS, Web Bluetooth on Android) lets your phone receive live drone data without losing its internet connection.
 
 ---
 
@@ -213,7 +359,7 @@ Previously, display brightness, LED strip brightness, and incognito mode control
 - **Foxhunter (mode 2)** — in the "Audio & Visual Settings" section
 - **Flock-You (mode 4)** — in the TOOLS tab under "DISPLAY SETTINGS"
 
-Sky Spy (mode 5) has no web server, so it is excluded.
+Sky Spy (mode 5) uses its own separate web server (CYD only); the `/brightness` endpoint is not wired to it.
 
 ### How It Works
 
@@ -278,8 +424,6 @@ Removed the `getASCIIArt()` call from the foxhunter HTML template, leaving the `
 | File | Change |
 |------|--------|
 | `src/raw/foxhunter.cpp` | Replaced `getASCIIArt()` concatenation with empty div |
-
----
 
 ---
 
@@ -470,11 +614,195 @@ Moved `board_config.h` to first include in all wrapper files for consistency wit
 - Trimmed 10 debug prints in `cyd_audio.cpp` to error lines + single `[CYD-AUDIO] Audio ready`
 - Removed touch coordinate debug `Serial.printf` calls from CYD selector and settings
 - Trimmed 5 heap diagnostic prints in `skyspy.cpp` to single summary line
+- Removed 4 DEBUG Serial prints from `foxhunter.cpp` (solid beep, beep ON/OFF, target RSSI)
 - Fixed malformed JSON status message: `"scanning"` -> `{"status":"scanning"}`
 
 ### Display Logic Deduplication
 
 Extracted `refreshDisplay()` helper in `skyspy.cpp` to eliminate ~45 lines of duplicated display update logic between the scanning and drone-detected display paths.
+
+---
+
+## 10. Sky Spy Persistent Drone Registry
+
+Upgraded Sky Spy from a flat in-session set to a rich JSON registry persisted across power cycles on the SD card.
+
+### Registry File
+
+`/oui-spy/skyspy/registry.json` — atomically written (tmp → rename for crash safety).
+
+### Data Model
+
+```json
+{
+  "abc123": {
+    "sessions": 4,
+    "pilot_lat": 37.7749,
+    "pilot_lon": -122.4194,
+    "pilot_lat_last": 37.7751,
+    "pilot_lon_last": -122.4190,
+    "samples": 12,
+    "op_id": "FAAoperatorXX",
+    "mac": "AA:BB:CC:DD:EE:FF"
+  }
+}
+```
+
+**Per-operator fields:**
+- `sessions` — count of separate power-cycle sessions this operator was detected in
+- `pilot_lat/lon` — running centroid of all pilot GPS readings (builds over time to reveal habitual launch sites)
+- `pilot_lat/lon_last` — most recent pilot GPS from last detection
+- `samples` — total pilot location samples used in centroid
+- `op_id` — FAA operator ID (from Remote ID broadcast)
+- `mac` — last seen BLE MAC
+
+### CYD Display Badge
+
+The drone detection screen shows a session badge in the top-right corner:
+- **NEW DRONE** (yellow) — UAS ID not seen in any previous session
+- **×N** (dim) — operator seen in N previous sessions
+
+### Implementation Details
+
+- `ssRegistry`: `std::map<std::string, SsRegEntry>` loaded at mode startup
+- `ssSessionIds`: `std::set<std::string>` tracking which operators have been registered in the current session (prevents double-counting sessions on re-detection)
+- `ssRegistryUpdate()` returns `sessions_seen` (uint32_t); saves only on new entry or first detection per session (not every 2-second display refresh)
+- STL headers (`<map>`, `<set>`, `<string>`, `<ArduinoJson.h>`) included in `mode_skyspy.cpp` before `namespace {}` — critical for correct linkage in anonymous namespace pattern
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/raw/skyspy.cpp` | `SsRegEntry` struct, `ssRegistry` map, `ssSessionIds` set, `ssRegistryLoad/Save/Update()` |
+| `src/mode_skyspy.cpp` | Added STL + ArduinoJson includes before `namespace {}` |
+| `src/display.h` | `bool isNew` → `int sessionsSeen` in `display_skyspy()` signature |
+| `src/display.cpp` | Updated parameter in T-Dongle stub |
+| `src/display_cyd.cpp` | Badge rendering: 0=none, 1=NEW (yellow), >1=×N (dim) |
+
+---
+
+## 11. Flock-You Persistent Device Registry
+
+Added a cross-session camera database to Flock-You, persisted on the SD card and exposed via a new HIST tab in the web dashboard.
+
+### Registry File
+
+`/oui-spy/flockyou/registry.json` — atomically written (tmp → rename for crash safety).
+
+### Data Model
+
+```json
+{
+  "AA:BB:CC:DD:EE:FF": {
+    "type": "flock",
+    "sightings": 47,
+    "lat": 37.7749,
+    "lon": -122.4194,
+    "hasGPS": true
+  }
+}
+```
+
+**Per-device fields:**
+- `type` — `"flock"` or `"raven"`
+- `sightings` — total detections across all sessions
+- `lat/lon` — GPS coordinates from last geotagged sighting
+- `hasGPS` — whether coordinates are available
+
+### CYD Display Badge
+
+Each detection on the CYD shows:
+- **NEW** (yellow) — MAC not seen in any previous session
+- **×N** (dim) — seen N total times across all sessions
+
+### Web Dashboard — HIST Tab
+
+A fifth tab added to the Flock-You dashboard loads the persistent registry from `/api/registry` and displays each known device with its MAC, type, total sightings, and GPS coordinates (if available).
+
+> 📷 **[Photo: Flock-You HIST tab showing the persistent device registry table]**
+
+### BLE-Safe SD Writes
+
+BLE `onResult` callbacks run on the BLE task. Performing SD I/O from that context risks blocking the BLE stack. Solution:
+- `fyRegistryUpdate()` (called from BLE callback): updates in-memory map only, sets `fyRegistryDirty` flag
+- `fyRegistrySave()` (called from `loop()`): performs the actual SD write when dirty flag is set
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/raw/flockyou.cpp` | `FYRegEntry` struct, `fyRegistry` map, `fyRegMutex`, `fyRegistryDirty` flag, `fyRegistryLoad/Save/Update()`, `/api/registry` endpoint, HIST tab HTML + JS |
+| `src/mode_flockyou.cpp` | Added STL includes (`<map>`, `<set>`, `<string>`) before `namespace {}` |
+| `src/display_cyd.cpp` | NEW/×N badge in `display_flockyou()` |
+
+---
+
+## 12. QR Code Layout Fix (CYD Sky Spy)
+
+The GPS coordinate QR code on both Sky Spy screens (scanning and drone-detected) was vertically centered in the right panel with the label below it. Repositioned to:
+- Bottom-anchored — sits just above the footer, matching the visual weight of the SETTINGS button on the selector screen
+- "DEVICE GPS" label rendered above the QR (font 2) instead of below it
+
+### Calculation
+
+```
+qrWrTop  = FTR_Y - 4 - (qrPixels + 8)   // white border rect top
+qrY      = qrWrTop + 4                   // first module row
+qrLabel  = qrWrTop - 20                  // label Y (above rect)
+```
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/display_cyd.cpp` | Updated `display_skyspy_scanning()` and `display_skyspy()` QR layout |
+
+---
+
+## 13. Sky Spy CYD — WiFi Dashboard + BLE GATT Live Tracking
+
+Added two complementary live-tracking channels to Sky Spy on the CYD. Previously Sky Spy was fully passive (no AP, no outbound data). The CYD now simultaneously:
+
+1. **Serves a WiFi dashboard** via a softAP on channel 6 (`skyspy-live` / `skyspy123`), auto-refreshing every 2 seconds at `http://192.168.4.1`
+2. **Advertises a BLE GATT peripheral** (Nordic UART Service) named `skyspy-live` that pushes drone JSON notifications every 2 seconds to any subscribed phone — no WiFi required, phone keeps its internet connection
+
+### Why Both?
+
+| Method | Internet preserved | iOS | Android | UX |
+|--------|-------------------|-----|---------|-----|
+| WiFi AP | No (bypass available) | ✓ | ✓ | Rich map dashboard |
+| BLE GATT | **Yes** | nRF Connect | Web BT / nRF Connect | Best long-term |
+
+### WiFi AP
+
+- `WIFI_AP_STA` mode — AP fixed on channel 6 (NAN dwell channel), promiscuous STA continues channel hopping
+- `AsyncWebServer` on port 80: `/` (WiFi dashboard), `/api/live` (JSON array of all drones seen < 30s ago), `/ble` (downloadable Web BT client page)
+- Dashboard HTML (`SS_HTML`) stored in `PROGMEM` (~1.7KB)
+- QR on scanning screen changed from Apple Maps device GPS → `http://192.168.4.1` (version 2, 4px modules, always shown, labeled "LIVE MAP")
+- QR on drone screen changed from Apple Maps → Google Maps (`maps.google.com/maps?saddr=PILOT&daddr=DRONE`), works on iOS + Android
+
+### BLE GATT Push
+
+- NimBLE concurrent central (scanning) + peripheral (GATT server) — both run simultaneously
+- Device name changed to `"skyspy-live"` on CYD (was `"DroneID"`)
+- Nordic UART Service (NUS) — universally recognized by nRF Connect, LightBlue, and Web Bluetooth
+- `NimBLEDevice::setMTU(247)` requested for full JSON payload headroom
+- `ssDroneChar->notify()` called in `refreshDisplay()` on every 2s timer tick
+- Drone present: full JSON with id, mac, lat, lon, alt, rssi, spd, hdg, plat, plon, ch, sats
+- No drone: `{"id":"","ch":N,"sats":N}` (keeps phone UI alive with channel info)
+- On phone disconnect: advertising restarts automatically (`SsGattCallbacks::onDisconnect`)
+
+### Web Bluetooth Client Page (`/ble`)
+
+Served from the ESP32 at `/ble` with `Content-Disposition: inline; filename="skyspy-ble.html"`. User downloads once while on the WiFi AP, then opens from local storage (`file://`) in Chrome on Android — Web Bluetooth is permitted in secure contexts including `file://` origins. Page detects `navigator.bluetooth` being undefined and shows platform-specific fallback instructions automatically.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/mode_skyspy.cpp` | Added `#include <AsyncTCP.h>`, `<ESPAsyncWebServer.h>`, `<NimBLEServer.h>` before namespace |
+| `src/raw/skyspy.cpp` | `WIFI_AP_STA` + `softAP`, GATT globals + `SsGattCallbacks`, `SS_BLE_HTML`, `ssSetupGatt()`, `ssSetupServer()` `/ble` endpoint, BLE notify in `refreshDisplay()` |
+| `src/display_cyd.cpp` | Scanning QR → `http://192.168.4.1` (v2, 4px, LIVE MAP, always drawn). Drone QR → Google Maps |
 
 ---
 
@@ -484,6 +812,6 @@ All three environments build successfully with all changes:
 
 | Environment | RAM | Flash |
 |-------------|-----|-------|
-| `seeed_xiao_esp32s3` | 25.3% | 18.1% |
-| `lilygo_tdongle_s3` | 25.9% | 19.4% |
-| `freenove_cyd_s3` | 26.4% | 19.1% |
+| `seeed_xiao_esp32s3` | 27.3% | 18.1% |
+| `lilygo_tdongle_s3` | 27.9% | 19.7% |
+| `freenove_cyd_s3` | 28.4% | 19.6% |

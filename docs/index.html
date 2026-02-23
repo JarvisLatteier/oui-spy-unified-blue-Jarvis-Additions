@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sky Spy — Live Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #111; font-family: monospace; font-size: 13px;
+      color: #0f0; height: 100dvh; display: flex; flex-direction: column;
+    }
+    #statusbar {
+      background: #000; border-bottom: 1px solid #1a1a1a;
+      padding: 0 12px; height: 38px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    #statusbar h1 { font-size: 14px; letter-spacing: 1px; }
+    #conn-status { font-size: 11px; color: #060; }
+    #map-wrap { position: relative; flex: 1; overflow: hidden; }
+    #map { width: 100%; height: 100%; }
+
+    /* --- connect overlay --- */
+    #connect-overlay {
+      position: absolute; inset: 0; z-index: 1000;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.55);
+    }
+    #btn-connect {
+      background: #0a0; color: #000; border: none;
+      padding: 14px 36px; font-family: monospace;
+      font-size: 16px; font-weight: bold; border-radius: 4px;
+      cursor: pointer; letter-spacing: 1px;
+    }
+    #btn-connect:disabled { opacity: 0.4; cursor: default; }
+    #ble-hint { color: #060; font-size: 11px; margin-top: 10px; text-align: center; max-width: 260px; line-height: 1.6; }
+    #ble-error { color: #f66; font-size: 12px; margin-top: 8px; text-align: center; max-width: 280px; }
+
+    /* --- no-drone bar --- */
+    #no-drone {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 900;
+      background: rgba(0,0,0,0.7); border-top: 1px solid #1a1a1a;
+      padding: 7px 12px; text-align: center;
+      color: #060; font-size: 12px; display: none;
+    }
+
+    /* --- drone info panel --- */
+    #info-panel {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 900;
+      background: rgba(0,0,0,0.88); border-top: 1px solid #0a0;
+      padding: 8px 12px 10px; display: none;
+    }
+    #drone-id { font-size: 15px; font-weight: bold; color: #0f0; margin-bottom: 5px; }
+    .irow { display: flex; justify-content: space-between; color: #060; font-size: 12px; margin-top: 3px; }
+    .irow span.v { color: #0c0; }
+    #i-pilot-row { display: none; }
+    #map-link {
+      display: block; margin-top: 8px; padding: 7px;
+      background: #0a0; color: #000; text-align: center;
+      text-decoration: none; border-radius: 3px;
+      font-weight: bold; font-size: 13px; letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="statusbar">
+  <h1>&#9992; SKY SPY LIVE</h1>
+  <span id="conn-status">disconnected</span>
+</div>
+
+<div id="map-wrap">
+  <div id="map"></div>
+
+  <div id="connect-overlay">
+    <button id="btn-connect" onclick="bleConnect()">CONNECT BLE</button>
+    <div id="ble-hint">Make sure you are within Bluetooth range<br>of your Sky Spy CYD device.</div>
+    <div id="ble-error"></div>
+  </div>
+
+  <div id="no-drone">
+    Scanning — no drones detected &nbsp;|&nbsp; WiFi CH: <span id="nd-ch">?</span>
+    &nbsp;|&nbsp; GPS: <span id="nd-sats">?</span>
+  </div>
+
+  <div id="info-panel">
+    <div id="drone-id">—</div>
+    <div class="irow">
+      <span>POSITION</span><span class="v" id="i-pos">—</span>
+    </div>
+    <div class="irow">
+      <span>ALT</span><span class="v" id="i-alt">—</span>
+      <span>SPEED</span><span class="v" id="i-spd">—</span>
+      <span>HDG</span><span class="v" id="i-hdg">—</span>
+      <span>RSSI</span><span class="v" id="i-rssi">—</span>
+    </div>
+    <div class="irow">
+      <span>CH</span><span class="v" id="i-ch">—</span>
+      <span>GPS</span><span class="v" id="i-sats">—</span>
+    </div>
+    <div class="irow" id="i-pilot-row">
+      <span>PILOT</span><span class="v" id="i-pilot">—</span>
+      <span>DIST</span><span class="v" id="i-dist">—</span>
+    </div>
+    <a id="map-link" href="#" target="_blank">&#128204; OPEN IN MAPS</a>
+  </div>
+</div>
+
+<script>
+var SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+var TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+// ── Map ──────────────────────────────────────────────────────────────────────
+var map = L.map('map', { zoomControl: true }).setView([20, 0], 2);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd', maxZoom: 20
+}).addTo(map);
+
+var droneIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:14px;height:14px;background:#f44;border:2px solid #fff;border-radius:50%;box-shadow:0 0 10px #f44,0 0 20px #f004"></div>',
+  iconSize: [14, 14], iconAnchor: [7, 7]
+});
+var pilotIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:11px;height:11px;background:#fa0;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px #fa0"></div>',
+  iconSize: [11, 11], iconAnchor: [5.5, 5.5]
+});
+
+var droneMarker = null;
+var pilotMarker = null;
+var trailLine   = null;
+var trailPts    = [];
+var centered    = false;
+
+// ── BLE ──────────────────────────────────────────────────────────────────────
+function bleConnect() {
+  if (!navigator.bluetooth) {
+    document.getElementById('ble-error').textContent =
+      'Web Bluetooth not available. Use Chrome on Android or desktop.';
+    return;
+  }
+  var btn = document.getElementById('btn-connect');
+  btn.disabled = true;
+  document.getElementById('ble-error').textContent = '';
+  setStatus('scanning...');
+
+  navigator.bluetooth.requestDevice({
+    filters: [{ name: 'skyspy-live' }],
+    optionalServices: [SVC]
+  })
+  .then(function(dev) {
+    dev.addEventListener('gattserverdisconnected', onDisc);
+    setStatus('connecting...');
+    return dev.gatt.connect();
+  })
+  .then(function(srv) { return srv.getPrimaryService(SVC); })
+  .then(function(svc) { return svc.getCharacteristic(TX); })
+  .then(function(ch) {
+    return ch.startNotifications().then(function() {
+      ch.addEventListener('characteristicvaluechanged', onData);
+      setStatus('connected \u2713');
+      document.getElementById('connect-overlay').style.display = 'none';
+      document.getElementById('no-drone').style.display = 'block';
+    });
+  })
+  .catch(function(e) {
+    setStatus('disconnected');
+    document.getElementById('ble-error').textContent = e.message;
+    btn.disabled = false;
+  });
+}
+
+function onDisc() {
+  setStatus('disconnected');
+  document.getElementById('btn-connect').disabled = false;
+  document.getElementById('connect-overlay').style.display = 'flex';
+  document.getElementById('info-panel').style.display = 'none';
+  document.getElementById('no-drone').style.display = 'none';
+  centered = false;
+}
+
+function onData(evt) {
+  try {
+    var d = JSON.parse(new TextDecoder().decode(evt.target.value));
+    updateMap(d);
+  } catch(e) {}
+}
+
+function setStatus(s) {
+  document.getElementById('conn-status').textContent = s;
+}
+
+// ── Map update ────────────────────────────────────────────────────────────────
+function haversineM(la1, lo1, la2, lo2) {
+  var R = 6371000, r = Math.PI / 180;
+  var dLa = (la2 - la1) * r, dLo = (lo2 - lo1) * r;
+  var a = Math.sin(dLa/2)*Math.sin(dLa/2) +
+          Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)*Math.sin(dLo/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function updateMap(d) {
+  document.getElementById('nd-ch').textContent   = d.ch   || '?';
+  document.getElementById('nd-sats').textContent = d.sats ? d.sats + ' sats' : '—';
+
+  if (!d.id) {
+    document.getElementById('info-panel').style.display = 'none';
+    document.getElementById('no-drone').style.display = 'block';
+    return;
+  }
+
+  document.getElementById('no-drone').style.display  = 'none';
+  document.getElementById('info-panel').style.display = 'block';
+
+  var ll = [d.lat, d.lon];
+
+  // Drone marker
+  if (!droneMarker) {
+    droneMarker = L.marker(ll, { icon: droneIcon, zIndexOffset: 100 }).addTo(map);
+    droneMarker.bindTooltip(d.id || d.mac || '?', { permanent: false, direction: 'top' });
+  } else {
+    droneMarker.setLatLng(ll);
+    droneMarker.setTooltipContent(d.id || d.mac || '?');
+  }
+
+  // Flight trail
+  trailPts.push(ll);
+  if (trailPts.length > 120) trailPts.shift();
+  if (!trailLine) {
+    trailLine = L.polyline(trailPts, { color: '#f44', weight: 2, opacity: 0.55 }).addTo(map);
+  } else {
+    trailLine.setLatLngs(trailPts);
+  }
+
+  // Pilot marker
+  if (d.plat && d.plon) {
+    var pll = [d.plat, d.plon];
+    if (!pilotMarker) {
+      pilotMarker = L.marker(pll, { icon: pilotIcon }).addTo(map);
+      pilotMarker.bindTooltip('Pilot', { permanent: false, direction: 'top' });
+    } else {
+      pilotMarker.setLatLng(pll);
+    }
+    // Line from pilot to drone
+    if (!map._pilotLine) {
+      map._pilotLine = L.polyline([pll, ll], { color: '#fa0', weight: 1, opacity: 0.4, dashArray: '4 6' }).addTo(map);
+    } else {
+      map._pilotLine.setLatLngs([pll, ll]);
+    }
+  }
+
+  // Auto-center on first real fix
+  if (!centered) {
+    map.setView(ll, 16);
+    centered = true;
+  }
+
+  // Info panel
+  document.getElementById('drone-id').textContent  = d.id || d.mac || 'Unknown';
+  document.getElementById('i-pos').textContent     = d.lat.toFixed(5) + ', ' + d.lon.toFixed(5);
+  document.getElementById('i-alt').textContent     = d.alt + 'm';
+  document.getElementById('i-spd').textContent     = d.spd + 'm/s';
+  document.getElementById('i-hdg').textContent     = d.hdg + '\u00b0';
+  document.getElementById('i-rssi').textContent    = d.rssi + 'dBm';
+  document.getElementById('i-ch').textContent      = d.ch;
+  document.getElementById('i-sats').textContent    = d.sats ? d.sats + ' sats' : '—';
+
+  if (d.plat && d.plon) {
+    var dist = haversineM(d.plat, d.plon, d.lat, d.lon);
+    document.getElementById('i-pilot-row').style.display = 'flex';
+    document.getElementById('i-pilot').textContent =
+      d.plat.toFixed(5) + ', ' + d.plon.toFixed(5);
+    document.getElementById('i-dist').textContent =
+      dist < 1000 ? Math.round(dist) + 'm' : (dist/1000).toFixed(2) + 'km';
+  } else {
+    document.getElementById('i-pilot-row').style.display = 'none';
+  }
+
+  // Google Maps link
+  var murl = (d.plat && d.plon)
+    ? 'https://maps.google.com/maps?saddr=' + d.plat + ',' + d.plon + '&daddr=' + d.lat + ',' + d.lon
+    : 'https://maps.google.com/maps?q=' + d.lat + ',' + d.lon;
+  document.getElementById('map-link').href = murl;
+}
+</script>
+</body>
+</html>

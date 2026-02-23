@@ -126,6 +126,7 @@ struct FYDetection {
     double gpsLon;
     float gpsAcc;
     bool hasGPS;
+    char alias[32];   // user-assigned label, persisted in registry
 };
 
 static FYDetection fyDet[MAX_DETECTIONS];
@@ -423,6 +424,7 @@ struct FYRegEntry {
     double   lat;          // last GPS lat
     double   lon;          // last GPS lon
     bool     hasGPS;
+    char     alias[32];    // user-assigned label
 };
 
 static std::map<std::string, FYRegEntry> fyRegistry;
@@ -445,7 +447,8 @@ static void fyRegistryLoad() {
         r.lat       = e["lat"] | 0.0;
         r.lon       = e["lon"] | 0.0;
         r.hasGPS    = e["gps"] | false;
-        strncpy(r.type, e["tp"] | "flock", sizeof(r.type) - 1);
+        strncpy(r.type,  e["tp"] | "flock", sizeof(r.type)  - 1);
+        strncpy(r.alias, e["al"] | "",      sizeof(r.alias) - 1);
         fyRegistry[mac] = r;
     }
     Serial.printf("[FY] Registry: %u known devices\n", (unsigned)fyRegistry.size());
@@ -471,6 +474,7 @@ static void fyRegistrySave() {
         e["lat"]  = kv.second.lat;
         e["lon"]  = kv.second.lon;
         e["gps"]  = kv.second.hasGPS;
+        if (kv.second.alias[0]) e["al"] = kv.second.alias;
     }
     serializeJson(doc, f);
     f.close();
@@ -483,8 +487,10 @@ static void fyRegistrySave() {
 
 // Called from BLE callback — map update only, no SD I/O
 // Returns lifetime sightings for this device (1=new, >1=repeat). 0 if mac empty.
+// If alias_out is non-null and the registry has an alias for this device, copies it there.
 static uint32_t fyRegistryUpdate(const char* mac, bool isRaven,
-                                  double lat, double lon) {
+                                  double lat, double lon,
+                                  char* alias_out = nullptr) {
     if (!mac || !mac[0]) return 0;
     if (!fyRegMutex || xSemaphoreTake(fyRegMutex, pdMS_TO_TICKS(50)) != pdTRUE) return 0;
 
@@ -520,6 +526,10 @@ static uint32_t fyRegistryUpdate(const char* mac, bool isRaven,
     }
 
     uint32_t result = e.sightings;
+    if (alias_out && e.alias[0]) {
+        strncpy(alias_out, e.alias, 31);
+        alias_out[31] = '\0';
+    }
     xSemaphoreGive(fyRegMutex);
     return result;
 }
@@ -680,12 +690,22 @@ class FYBLECallbacks : public NimBLEAdvertisedDeviceCallbacks {
             fyLastHB = millis();
 
 #if HAS_SD_CARD
+            char regAlias[32] = {};
             int lifetimeSightings = (int)fyRegistryUpdate(
                 addrStr.c_str(), isRaven,
                 fyGPSIsFresh() ? fyGPSLat : 0.0,
-                fyGPSIsFresh() ? fyGPSLon : 0.0
+                fyGPSIsFresh() ? fyGPSLon : 0.0,
+                regAlias
             );
+            // Propagate alias into in-session detection record
+            if (idx >= 0 && regAlias[0]) {
+                if (fyMutex && xSemaphoreTake(fyMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+                    strncpy(fyDet[idx].alias, regAlias, sizeof(fyDet[idx].alias) - 1);
+                    xSemaphoreGive(fyMutex);
+                }
+            }
 #else
+            char regAlias[32] = {};
             int lifetimeSightings = 0;
 #endif
 #ifdef ENABLE_TFT_DISPLAY
@@ -701,6 +721,7 @@ class FYBLECallbacks : public NimBLEAdvertisedDeviceCallbacks {
                              , isRaven
                              , isRaven ? ravenFW : nullptr
                              , idx >= 0 && fyDet[idx].hasGPS
+                             , regAlias[0] ? regAlias : nullptr
                              );
 #endif
 #if HAS_SD_CARD
@@ -737,6 +758,9 @@ static void writeDetectionsJSON(AsyncResponseStream *resp) {
                 fyDet[i].mac, fyDet[i].name, fyDet[i].rssi, fyDet[i].method,
                 fyDet[i].firstSeen, fyDet[i].lastSeen, fyDet[i].count,
                 fyDet[i].isRaven ? "true" : "false", fyDet[i].ravenFW);
+            if (fyDet[i].alias[0]) {
+                resp->printf(",\"alias\":\"%s\"", fyDet[i].alias);
+            }
             // Append GPS if present
             if (fyDet[i].hasGPS) {
                 resp->printf(",\"gps\":{\"lat\":%.8f,\"lon\":%.8f,\"acc\":%.1f}",
@@ -957,13 +981,15 @@ function fySetBr(){fetch('/brightness?disp='+document.getElementById('dspBr').va
 function fyIncog(on){var d=on?0:document.getElementById('dspBr').value,l=on?0:document.getElementById('ledBr').value;fetch('/brightness?disp='+d+'&led='+l);}
 fetch('/brightness').then(r=>r.json()).then(j=>{document.getElementById('dspBr').value=j.disp;document.getElementById('dspVal').textContent=j.disp;document.getElementById('ledBr').value=j.led;document.getElementById('ledVal').textContent=j.led;}).catch(()=>{});
 function tab(i,el){document.querySelectorAll('.tb button').forEach(b=>b.classList.remove('a'));document.querySelectorAll('.pn').forEach(p=>p.classList.remove('a'));el.classList.add('a');document.getElementById('p'+i).classList.add('a');if(i===1&&!window._hL)loadHistory();if(i===2&&!window._pL)loadPat();if(i===4&&!window._rL)loadReg();}
-function loadReg(){fetch('/api/registry').then(r=>r.json()).then(j=>{let E=j.entries||[];let el=document.getElementById('regL');if(!E.length){el.innerHTML='<div class="empty">No registry data yet.<br>Devices are tracked across sessions on SD card.</div>';window._rL=1;return;}E.sort((a,b)=>b.s-a.s);el.innerHTML='<div style="font-size:11px;color:#8b5cf6;margin-bottom:8px">'+E.length+' known devices (lifetime)</div>'+E.map(e=>'<div class="det"><div class="mac">'+e.mac+'<span class="nm">'+(e.tp==='raven'?'RAVEN':'FLOCK')+'</span></div><div class="inf"><span style="color:#ec4899;font-weight:bold">&times;'+e.s+' sessions</span>'+(e.gps?'<span style="color:#22c55e">&#9673; '+e.lat.toFixed(5)+','+e.lon.toFixed(5)+'</span>':'<span style="color:#666">no gps</span>')+'</div></div>').join('');window._rL=1;}).catch(()=>{document.getElementById('regL').innerHTML='<div class="empty">Registry unavailable (no SD card)</div>';});}
+function loadReg(){fetch('/api/registry').then(r=>r.json()).then(j=>{let E=j.entries||[];let el=document.getElementById('regL');if(!E.length){el.innerHTML='<div class="empty">No registry data yet.<br>Devices are tracked across sessions on SD card.</div>';window._rL=1;return;}E.sort((a,b)=>b.s-a.s);el.innerHTML='<div style="font-size:11px;color:#8b5cf6;margin-bottom:8px">'+E.length+' known devices (lifetime)</div>'+E.map(e=>'<div class="det"><div class="mac">'+e.mac+'<span class="nm">'+(e.tp==='raven'?'RAVEN':'FLOCK')+'</span>'+(e.al?'<div style="color:#22c55e;font-weight:bold;font-size:13px;margin-top:2px">'+e.al+'</div>':'')+'</div><div class="inf"><span style="color:#ec4899;font-weight:bold">&times;'+e.s+' sessions</span>'+(e.gps?'<span style="color:#22c55e">&#9673; '+e.lat.toFixed(5)+','+e.lon.toFixed(5)+'</span>':'<span style="color:#666">no gps</span>')+'</div></div>').join('');window._rL=1;}).catch(()=>{document.getElementById('regL').innerHTML='<div class="empty">Registry unavailable (no SD card)</div>';});}
 function refresh(){fetch('/api/detections').then(r=>r.json()).then(d=>{D=d;render();stats();}).catch(()=>{});}
 function render(){const el=document.getElementById('dL');if(!D.length){el.innerHTML='<div class="empty">Scanning for surveillance devices...<br>BLE active on all channels</div>';return;}
 D.sort((a,b)=>b.last-a.last);el.innerHTML=D.map(card).join('');}
 function stats(){document.getElementById('sT').textContent=D.length;document.getElementById('sR').textContent=D.filter(d=>d.raven).length;
 fetch('/api/stats').then(r=>r.json()).then(s=>{let g=document.getElementById('sG');let gl=document.getElementById('sGL');let gc=document.getElementById('gpsCard');if(s.gps_onboard){window._hwGPS=true;g.textContent=s.gps_sats+' SAT';g.style.color='#22c55e';g.style.fontSize='14px';gl.textContent='HW GPS';gl.style.color='#22c55e';gc.style.cursor='default';gc.style.borderColor='#22c55e';}else if(s.gps_valid){g.textContent=s.gps_tagged+'/'+s.total;g.style.color='#22c55e';gl.textContent='PHONE';gl.style.color='#22c55e';}else{g.textContent='TAP';g.style.color='#ef4444';gl.textContent='GPS';gl.style.color='#8b5cf6';}}).catch(()=>{});}
-function card(d){return '<div class="det"><div class="mac">'+d.mac+(d.name?'<span class="nm">'+d.name+'</span>':'')+'</div><div class="inf"><span>RSSI: '+d.rssi+'</span><span>'+d.method+'</span><span style="color:#ec4899;font-weight:bold">&times;'+d.count+'</span>'+(d.raven?'<span class="rv">RAVEN '+d.fw+'</span>':'')+(d.gps?'<span style="color:#22c55e">&#9673; '+d.gps.lat.toFixed(5)+','+d.gps.lon.toFixed(5)+'</span>':'<span style="color:#666">no gps</span>')+'</div></div>';}
+function macId(m){return m.replace(/:/g,'_');}
+function setAlias(m,v){fetch('/api/alias?mac='+encodeURIComponent(m)+'&alias='+encodeURIComponent(v)).then(()=>refresh()).catch(()=>{});}
+function card(d){var mid=macId(d.mac);return '<div class="det"><div class="mac">'+d.mac+(d.name?'<span class="nm">'+d.name+'</span>':'')+(d.alias?'<div style="color:#22c55e;font-weight:bold;font-size:13px;margin-top:2px">'+d.alias+'</div>':'')+'</div><div class="inf"><span>RSSI: '+d.rssi+'</span><span>'+d.method+'</span><span style="color:#ec4899;font-weight:bold">&times;'+d.count+'</span>'+(d.raven?'<span class="rv">RAVEN '+d.fw+'</span>':'')+(d.gps?'<span style="color:#22c55e">&#9673; '+d.gps.lat.toFixed(5)+','+d.gps.lon.toFixed(5)+'</span>':'<span style="color:#666">no gps</span>')+'</div><div style="display:flex;gap:4px;margin-top:5px"><input id="al_'+mid+'" style="flex:1;background:#111;color:#e0e0e0;border:1px solid #8b5cf6;border-radius:4px;padding:3px 6px;font-size:12px;font-family:inherit" placeholder="Label this device..." value="'+(d.alias||'')+'" maxlength="31"><button onclick="setAlias(\''+d.mac+'\',document.getElementById(\'al_'+mid+'\').value)" style="background:#8b5cf6;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px">SET</button></div></div>';}
 function loadHistory(){fetch('/api/history').then(r=>r.json()).then(d=>{H=d;let el=document.getElementById('hL');if(!H.length){el.innerHTML='<div class="empty">No prior session data</div>';return;}
 H.sort((a,b)=>b.last-a.last);el.innerHTML='<div style="font-size:11px;color:#8b5cf6;margin-bottom:8px">'+H.length+' detections from prior session</div>'+H.map(card).join('');window._hL=1;}).catch(()=>{document.getElementById('hL').innerHTML='<div class="empty">No prior session data</div>';});}
 function loadPat(){fetch('/api/patterns').then(r=>r.json()).then(p=>{let h='';
@@ -1244,6 +1270,39 @@ static void fySetupServer() {
         char json[64];
         snprintf(json, sizeof(json), "{\"disp\":%d,\"led\":%d}", cd, cl);
         request->send(200, "application/json", json);
+    });
+
+    // API: Set/update a user alias for a device (persisted to registry)
+    fyServer.on("/api/alias", HTTP_GET, [](AsyncWebServerRequest *r) {
+        if (!r->hasParam("mac") || !r->hasParam("alias")) {
+            r->send(400, "application/json", "{\"error\":\"mac and alias required\"}");
+            return;
+        }
+        String mac   = r->getParam("mac")->value();
+        String alias = r->getParam("alias")->value();
+        if (alias.length() > 31) alias = alias.substring(0, 31);
+#if HAS_SD_CARD
+        if (fyRegMutex && xSemaphoreTake(fyRegMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+            FYRegEntry& e = fyRegistry[mac.c_str()];
+            strncpy(e.alias, alias.c_str(), sizeof(e.alias) - 1);
+            e.alias[sizeof(e.alias) - 1] = '\0';
+            fyRegistryDirty = true;
+            xSemaphoreGive(fyRegMutex);
+        }
+#endif
+        // Update in-session detection record too
+        if (fyMutex && xSemaphoreTake(fyMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            for (int i = 0; i < fyDetCount; i++) {
+                if (strcasecmp(fyDet[i].mac, mac.c_str()) == 0) {
+                    strncpy(fyDet[i].alias, alias.c_str(), sizeof(fyDet[i].alias) - 1);
+                    fyDet[i].alias[sizeof(fyDet[i].alias) - 1] = '\0';
+                    break;
+                }
+            }
+            xSemaphoreGive(fyMutex);
+        }
+        r->send(200, "application/json", "{\"status\":\"ok\"}");
+        printf("[FLOCK-YOU] Alias set: %s -> %s\n", mac.c_str(), alias.c_str());
     });
 
     // API: Cross-session device registry (SD card)

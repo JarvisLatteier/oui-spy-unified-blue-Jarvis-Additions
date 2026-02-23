@@ -443,7 +443,7 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
                       const char* method, int rssi, int gpsSats,
                       const char* name, int sightings,
                       bool isRaven, const char* ravenFW,
-                      bool gpsTagged) {
+                      bool gpsTagged, const char* alias) {
     initScreen(SCR_FLOCKYOU, "FLOCK-YOU");
 
     auto& g = gfx();
@@ -475,9 +475,14 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
         }
     }
 
-    // Row 3: Device name (truncated)
+    // Row 3: Alias (if set) or BLE device name
     clearRow(CNT_Y + 52, 18);
-    if (name && name[0]) {
+    if (alias && alias[0]) {
+        char alBuf[31];
+        snprintf(alBuf, sizeof(alBuf), "%s", alias);
+        g.setTextColor(C_FG, C_BG);   // bright green = user label
+        g.drawString(alBuf, 8, CNT_Y + 52, 2);
+    } else if (name && name[0]) {
         char nameBuf[31];
         snprintf(nameBuf, sizeof(nameBuf), "%s", name);
         g.setTextColor(C_DIM, C_BG);
@@ -626,11 +631,11 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
             char url[128];
             if (pilotLat != 0.0 || pilotLon != 0.0) {
                 snprintf(url, sizeof(url),
-                    "https://maps.apple.com/?saddr=%.6f,%.6f&daddr=%.6f,%.6f",
+                    "https://maps.google.com/maps?saddr=%.6f,%.6f&daddr=%.6f,%.6f",
                     pilotLat, pilotLon, lat, lon);
             } else {
                 snprintf(url, sizeof(url),
-                    "https://maps.apple.com/?ll=%.6f,%.6f&q=Drone",
+                    "https://maps.google.com/maps?q=%.6f,%.6f",
                     lat, lon);
             }
 
@@ -638,13 +643,23 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
             uint8_t qrData[qrcode_getBufferSize(5)];
             qrcode_initText(&qr, qrData, 5, ECC_LOW, url);
 
-            int modSize = 3;
-            int qrPixels = qr.size * modSize;
-            int qrX = 160 + (160 - qrPixels) / 2;
-            int qrY = CNT_Y + (CNT_H - qrPixels - 20) / 2;
+            int modSize    = 3;
+            int qrPixels   = qr.size * modSize;
+            int qrX        = 160 + (160 - qrPixels) / 2;
+
+            // Bottom-align: anchor to footer, build upward
+            int qrBotLabel = FTR_Y - 12;                         // bottom label Y
+            int qrWrTop    = qrBotLabel - 6 - (qrPixels + 8);   // white rect top
+            int qrY        = qrWrTop + 4;                        // first module row
+            int qrTopLabel = qrWrTop - 20;                       // top label Y
+
+            // Label above QR
+            g.setTextColor(C_DIM, C_BG);
+            g.setTextDatum(TC_DATUM);
+            g.drawString((pilotLat != 0.0 || pilotLon != 0.0) ? "PILOT>DRONE" : "DRONE POS", 240, qrTopLabel, 2);
 
             // White background with quiet zone
-            g.fillRect(qrX - 4, qrY - 4, qrPixels + 8, qrPixels + 8, TFT_WHITE);
+            g.fillRect(qrX - 4, qrWrTop, qrPixels + 8, qrPixels + 8, TFT_WHITE);
             // Draw modules
             for (uint8_t y = 0; y < qr.size; y++) {
                 for (uint8_t x = 0; x < qr.size; x++) {
@@ -654,10 +669,10 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     }
                 }
             }
-            // Label below QR
+            // "Open in Maps" label below QR
             g.setTextColor(C_DIM, C_BG);
             g.setTextDatum(TC_DATUM);
-            g.drawString("Scan for Maps", 240, qrY + qrPixels + 6, 1);
+            g.drawString("Open in Maps", 240, qrBotLabel, 1);
         }
     }
 
@@ -700,61 +715,58 @@ void display_skyspy_scanning(int count, double devLat, double devLon,
         g.drawString(gpsBuf, 8, CNT_Y + 75, 2);
     }
 
-    // Coords + QR (dynamic)
+    // Left: device GPS coords (dynamic, conditional on GPS fix)
     clearRow(CNT_Y + 95, 18, 0, 160);
     if (devLat != 0.0 || devLon != 0.0) {
-        // Show device coords text
         char coordBuf[32];
         snprintf(coordBuf, sizeof(coordBuf), "%.5f,%.5f", devLat, devLon);
         g.setTextColor(C_DIM, C_BG);
+        g.setTextDatum(TL_DATUM);
         g.drawString(coordBuf, 8, CNT_Y + 95, 2);
-
-        // Only redraw QR if coords changed significantly
-        bool qrChanged = layoutChanged ||
-            fabs(devLat - prevQrLat) > 0.0001 ||
-            fabs(devLon - prevQrLon) > 0.0001;
-
-        if (qrChanged) {
-            prevQrLat = devLat;
-            prevQrLon = devLon;
-
-            // Clear right-half QR region
-            clearRow(CNT_Y, CNT_H, 160, 160);
-
-            // Right half: QR code of device location
-            char url[128];
-            snprintf(url, sizeof(url),
-                "https://maps.apple.com/?ll=%.6f,%.6f&q=Device",
-                devLat, devLon);
-
-            QRCode qr;
-            uint8_t qrData[qrcode_getBufferSize(5)];
-            qrcode_initText(&qr, qrData, 5, ECC_LOW, url);
-
-            int modSize = 3;
-            int qrPixels = qr.size * modSize;
-            int qrX = 170 + (150 - qrPixels) / 2;
-            int qrY = CNT_Y + (CNT_H - qrPixels - 20) / 2;
-
-            // White background with quiet zone
-            g.fillRect(qrX - 4, qrY - 4, qrPixels + 8, qrPixels + 8, TFT_WHITE);
-            for (uint8_t y = 0; y < qr.size; y++) {
-                for (uint8_t x = 0; x < qr.size; x++) {
-                    if (qrcode_getModule(&qr, x, y)) {
-                        g.fillRect(qrX + x * modSize, qrY + y * modSize,
-                                     modSize, modSize, TFT_BLACK);
-                    }
-                }
-            }
-            g.setTextColor(C_DIM, C_BG);
-            g.setTextDatum(TC_DATUM);
-            g.drawString("Device GPS", 170 + 75, qrY + qrPixels + 6, 1);
-        }
     } else {
 #if HAS_GPS
         g.setTextColor(C_DIM, C_BG);
+        g.setTextDatum(TL_DATUM);
         g.drawString("GPS: waiting...", 8, CNT_Y + 95, 2);
 #endif
+    }
+
+    // Right: LIVE MAP QR — always shown, drawn once on layout change
+    if (layoutChanged) {
+        clearRow(CNT_Y, CNT_H, 160, 160);
+
+        QRCode qr;
+        uint8_t qrData[qrcode_getBufferSize(2)];
+        qrcode_initText(&qr, qrData, 2, ECC_LOW, "http://192.168.4.1");
+
+        int modSize     = 4;
+        int qrPixels    = qr.size * modSize;          // 25 * 4 = 100
+        int qrX         = 170 + (150 - qrPixels) / 2; // center in right 150px
+        int qrBotLabel  = FTR_Y - 12;
+        int qrWrTop     = qrBotLabel - 6 - (qrPixels + 8);
+        int qrY         = qrWrTop + 4;
+        int qrTopLabel  = qrWrTop - 20;
+
+        // "LIVE MAP" label above QR
+        g.setTextColor(C_FG, C_BG);
+        g.setTextDatum(TC_DATUM);
+        g.drawString("LIVE MAP", 245, qrTopLabel, 2);
+
+        // White background with quiet zone
+        g.fillRect(qrX - 4, qrWrTop, qrPixels + 8, qrPixels + 8, TFT_WHITE);
+        for (uint8_t y = 0; y < qr.size; y++) {
+            for (uint8_t x = 0; x < qr.size; x++) {
+                if (qrcode_getModule(&qr, x, y)) {
+                    g.fillRect(qrX + x * modSize, qrY + y * modSize,
+                               modSize, modSize, TFT_BLACK);
+                }
+            }
+        }
+
+        // AP label below QR
+        g.setTextColor(C_DIM, C_BG);
+        g.setTextDatum(TC_DATUM);
+        g.drawString("skyspy-live", 245, qrBotLabel, 1);
     }
 
     drawSsSettingsButton();

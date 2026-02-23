@@ -8,6 +8,9 @@
 // All includes (outside namespace) - NimBLE instead of classic BLE
 #include "board_config.h"
 #include <Arduino.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <NimBLEServer.h>
 #include <HardwareSerial.h>
 #include <NimBLEDevice.h>
 #include <WiFi.h>

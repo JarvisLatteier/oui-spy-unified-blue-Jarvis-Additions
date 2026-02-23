@@ -232,7 +232,7 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
                       const char* method, int rssi, int /*gpsSats*/,
                       const char* /*name*/, int /*sightings*/,
                       bool /*isRaven*/, const char* /*ravenFW*/,
-                      bool /*gpsTagged*/) {
+                      bool /*gpsTagged*/, const char* /*alias*/) {
     spr.fillSprite(C_BG);
     drawHeader("FLOCK-YOU");
 
