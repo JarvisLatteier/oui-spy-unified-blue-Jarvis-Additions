@@ -151,7 +151,7 @@ function bleConnect() {
   setStatus('scanning...');
 
   navigator.bluetooth.requestDevice({
-    filters: [{ name: 'skyspy-live' }],
+    filters: [{ namePrefix: 'skyspy' }],
     optionalServices: [SVC]
   })
   .then(function(dev) {
