@@ -192,7 +192,7 @@ When no drone is active the CYD scanning screen shows:
 
 When a drone is detected:
 - Drone ID, MAC, altitude, RSSI, and GPS coordinates fill the left panel
-- Right panel shows a **Google Maps QR code** — scan to open turn-by-turn directions from pilot launch point to current drone position (or single drone pin if no pilot data)
+- Right panel shows an **Apple Maps QR code** — scan to open turn-by-turn directions from pilot launch point to current drone position (or a single pin centered on the pilot if no drone position is available)
 - **NEW DRONE** (yellow) / **×N REPEAT** (dim) badge indicates whether this operator has been seen before across sessions
 
 > 📷 **[Photo: CYD Sky Spy drone detected screen with NEW or REPEAT badge]**
@@ -319,6 +319,37 @@ The T-Dongle and CYD support SD card logging. Insert a FAT32-formatted micro SD 
 - Files are only created when a detection occurs (no empty files)
 - `registry.json` files are persistent cross-session databases (see Flock-You and Sky Spy sections above)
 - Display footer shows `SD:OK / Files:N` with per-mode file count
+
+**Sky Spy track log format** — each line is one drone position snapshot:
+```json
+{"t":12453,"mac":"aa:bb:cc:dd:ee:ff","rssi":-68,
+ "drone_lat":37.123456,"drone_long":-122.123456,
+ "drone_altitude":45,"alt_agl":30,
+ "spd":3,"hdg":180,
+ "pilot_lat":37.121000,"pilot_long":-122.121000,
+ "basic_id":"HX12345"}
+```
+`t` is milliseconds since session start — sort by `t` to replay the flight in order.
+
+**How fast do files grow?**
+
+FAA Remote ID mandates 1 broadcast per second per drone. At ~220 bytes per record:
+
+| Session | Approximate size |
+|---------|-----------------|
+| 1 drone, 30 minutes | ~400 KB |
+| 1 drone, 1 hour | ~800 KB |
+| 100 sessions (heavy field use) | ~40 MB |
+
+A 4 GB card at normal usage rates would take years to fill.
+
+**Low-space protection:**
+
+The firmware monitors free space at the start of each session:
+- Below **50 MB free** — footer changes from `SD:OK` to `SD:LOW`. Logging continues; delete old session files soon.
+- Below **5 MB free** — footer shows `SD:FULL`. Writes are suspended to prevent filesystem corruption.
+
+To free space, remove the SD card, connect to a computer, and delete session files from `/oui-spy/skyspy/` or other mode folders. The `registry.json` files are small and worth keeping.
 
 **Accessing logs:**
 - Remove the SD card and read on a computer
@@ -778,8 +809,8 @@ Added two complementary live-tracking channels to Sky Spy on the CYD. Previously
 - `WIFI_AP_STA` mode — AP fixed on channel 6 (NAN dwell channel), promiscuous STA continues channel hopping
 - `AsyncWebServer` on port 80: `/` (WiFi dashboard), `/api/live` (JSON array of all drones seen < 30s ago), `/ble` (downloadable Web BT client page)
 - Dashboard HTML (`SS_HTML`) stored in `PROGMEM` (~1.7KB)
-- QR on scanning screen changed from Apple Maps device GPS → `http://192.168.4.1` (version 2, 4px modules, always shown, labeled "LIVE MAP")
-- QR on drone screen changed from Apple Maps → Google Maps (`maps.google.com/maps?saddr=PILOT&daddr=DRONE`), works on iOS + Android
+- QR on scanning screen changed from GPS coordinates → `http://192.168.4.1` (version 2, 4px modules, always shown, labeled "LIVE MAP")
+- QR on drone screen links to Apple Maps (`maps.apple.com/?saddr=PILOT&daddr=DRONE`), falling back to single-point pin on pilot position if drone coords unavailable
 
 ### BLE GATT Push
 
@@ -803,6 +834,49 @@ Served from the ESP32 at `/ble` with `Content-Disposition: inline; filename="sky
 | `src/mode_skyspy.cpp` | Added `#include <AsyncTCP.h>`, `<ESPAsyncWebServer.h>`, `<NimBLEServer.h>` before namespace |
 | `src/raw/skyspy.cpp` | `WIFI_AP_STA` + `softAP`, GATT globals + `SsGattCallbacks`, `SS_BLE_HTML`, `ssSetupGatt()`, `ssSetupServer()` `/ble` endpoint, BLE notify in `refreshDisplay()` |
 | `src/display_cyd.cpp` | Scanning QR → `http://192.168.4.1` (v2, 4px, LIVE MAP, always drawn). Drone QR → Google Maps |
+
+---
+
+## 14. Sky Spy Flight Track Logging + SD Low-Space Guard
+
+### Flight Track Log Fields
+
+Expanded the Sky Spy session JSONL to include a full set of flight track fields. Previously logged: `mac`, `rssi`, `drone_lat/long`, `drone_altitude`, `pilot_lat/long`, `basic_id`. Now also logs:
+
+| Field | Description |
+|-------|-------------|
+| `t` | Milliseconds since session start — enables chronological replay and gap detection |
+| `alt_agl` | Height above ground level (metres) |
+| `spd` | Horizontal speed (m/s) |
+| `hdg` | Heading (degrees, 0–360) |
+
+JSON buffer increased from 256 to 320 bytes to accommodate the wider format.
+
+### SD Card Low-Space Guard
+
+Added proactive free-space monitoring to prevent silent data loss when the SD card fills up.
+
+**Thresholds:**
+- `SD_WARN_MB` = 50 MB — sets `_sdLow` flag, footer shows `SD:LOW / Files:N`
+- `SD_CRIT_MB` = 5 MB — sets `_sdFull` flag, writes suspended, footer shows `SD:FULL`
+
+Space is checked at the start of each session (`sdlog_start_session()`). Two new public functions expose the state:
+- `sdlog_is_low()` — returns true below 50 MB
+- `sdlog_is_full()` — returns true below 5 MB
+
+`sdlog_write()` returns early (no write, no crash) when `_sdFull` is set.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/raw/skyspy.cpp` | Added `ssSessionStartMs`, `t`/`alt_agl`/`spd`/`hdg` to `send_json_fast()`, buffer 256→320 |
+| `src/sdlog.h` | Added `sdlog_is_low()`, `sdlog_is_full()` declarations and inline no-op stubs |
+| `src/sdlog.cpp` | Added `SD_WARN_MB`/`SD_CRIT_MB` thresholds, `_sdLow`/`_sdFull` flags, `checkSpace()`, guard in `sdlog_write()` |
+| `src/display.h` | Updated `display_sd_status()` signature with `low`/`full` params (defaulted) |
+| `src/display.cpp` | Updated T-Dongle stub signature |
+| `src/display_cyd.cpp` | Added `sd_low`/`sd_full` state, `SD:LOW` / `SD:FULL` footer rendering |
+| `src/main.cpp` | Passes `sdlog_is_low()`, `sdlog_is_full()` to `display_sd_status()` |
 
 ---
 
