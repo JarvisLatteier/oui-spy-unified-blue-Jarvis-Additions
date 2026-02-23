@@ -535,7 +535,7 @@ static void drawSsSettingsButton();  // forward declaration
 void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     int alt, int rssi, int total,
                     double pilotLat, double pilotLon,
-                    int gpsSats, int wifiCh, bool isNew) {
+                    int gpsSats, int wifiCh, int sessionsSeen) {
     bool layoutChanged = initScreen(SCR_SKYSPY_DRONE, "SKY SPY");
 
     auto& g = gfx();
@@ -546,10 +546,16 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
     g.setTextColor(C_ALERT, C_BG);
     g.setTextDatum(TL_DATUM);
     g.drawString("DRONE DETECTED", 8, CNT_Y + 4, 2);
-    if (id && id[0]) {
+    if (id && id[0] && sessionsSeen > 0) {
+        char badge[8];
+        if (sessionsSeen == 1) {
+            snprintf(badge, sizeof(badge), "NEW");
+        } else {
+            snprintf(badge, sizeof(badge), "x%d", sessionsSeen);
+        }
         g.setTextDatum(TR_DATUM);
-        g.setTextColor(isNew ? C_WARN : C_DIM, C_BG);
-        g.drawString(isNew ? "NEW" : "SEEN", 152, CNT_Y + 4, 2);
+        g.setTextColor(sessionsSeen == 1 ? C_WARN : C_DIM, C_BG);
+        g.drawString(badge, 152, CNT_Y + 4, 2);
         g.setTextDatum(TL_DATUM);
     }
 

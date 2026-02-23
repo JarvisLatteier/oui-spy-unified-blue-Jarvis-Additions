@@ -89,33 +89,124 @@ static double ssDevLon = 0;
 static int    ssDevSats = 0;
 #endif
 
-// Persistent drone registry (cross-session "seen before" tracking)
+// Persistent drone registry (cross-session tracking via JSON on SD card)
 #if HAS_SD_CARD
-static std::set<std::string> ssKnownIds;  // loaded from SD at startup, immutable during session
-static std::set<std::string> ssAddedIds;  // appended this session (dedup guard)
-static const char SS_REG_PATH[] = "/oui-spy/skyspy/registry.txt";
+static const uint8_t SS_REG_MAX        = 100;
+static const char    SS_REG_PATH[]     = "/oui-spy/skyspy/registry.json";
+static const char    SS_REG_TMP_PATH[] = "/oui-spy/skyspy/registry.tmp";
+
+struct SsRegEntry {
+  uint32_t sessions;           // total sessions seen across all power cycles
+  double   pilot_lat;          // running centroid of pilot launch position
+  double   pilot_lon;
+  double   pilot_lat_last;     // most recent pilot position
+  double   pilot_lon_last;
+  uint32_t samples;            // sample count for centroid averaging
+  char     op_id[ODID_ID_SIZE + 1];
+  char     mac[18];
+};
+
+static std::map<std::string, SsRegEntry> ssRegistry;    // loaded at startup
+static std::set<std::string>             ssSessionIds;   // IDs incremented this session
 
 static void ssRegistryLoad() {
   File f = SD_MMC.open(SS_REG_PATH, "r");
   if (!f) { Serial.println("[SKY-SPY] No registry yet"); return; }
-  while (f.available()) {
-    String line = f.readStringUntil('\n');
-    line.trim();
-    if (line.length() > 0) ssKnownIds.insert(line.c_str());
-  }
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
   f.close();
-  Serial.printf("[SKY-SPY] Registry: %u known drones\n", (unsigned)ssKnownIds.size());
+  if (err) { Serial.printf("[SKY-SPY] Registry parse error: %s\n", err.c_str()); return; }
+  for (JsonObject e : doc["entries"].as<JsonArray>()) {
+    const char* id = e["id"] | "";
+    if (!id[0]) continue;
+    SsRegEntry r = {};
+    r.sessions       = e["sessions"] | 1u;
+    r.pilot_lat      = e["plat"]  | 0.0;
+    r.pilot_lon      = e["plon"]  | 0.0;
+    r.pilot_lat_last = e["pllat"] | 0.0;
+    r.pilot_lon_last = e["pllon"] | 0.0;
+    r.samples        = e["samp"]  | 0u;
+    strncpy(r.op_id, e["op"]  | "", sizeof(r.op_id) - 1);
+    strncpy(r.mac,   e["mac"] | "", sizeof(r.mac)   - 1);
+    ssRegistry[id] = r;
+  }
+  Serial.printf("[SKY-SPY] Registry: %u known drones\n", (unsigned)ssRegistry.size());
 }
 
-static void ssRegistryAdd(const char* id) {
-  if (!id || !id[0]) return;
-  if (ssKnownIds.count(id) || ssAddedIds.count(id)) return;
-  ssAddedIds.insert(id);
-  File f = SD_MMC.open(SS_REG_PATH, FILE_APPEND);
-  if (!f) return;
-  f.println(id);
+static void ssRegistrySave() {
+  File f = SD_MMC.open(SS_REG_TMP_PATH, FILE_WRITE);
+  if (!f) { Serial.println("[SKY-SPY] Registry save: open failed"); return; }
+  JsonDocument doc;
+  doc["v"] = 1;
+  JsonArray arr = doc["entries"].to<JsonArray>();
+  for (auto& kv : ssRegistry) {
+    JsonObject e  = arr.add<JsonObject>();
+    e["id"]       = kv.first.c_str();
+    e["op"]       = kv.second.op_id;
+    e["mac"]      = kv.second.mac;
+    e["sessions"] = kv.second.sessions;
+    e["plat"]     = kv.second.pilot_lat;
+    e["plon"]     = kv.second.pilot_lon;
+    e["pllat"]    = kv.second.pilot_lat_last;
+    e["pllon"]    = kv.second.pilot_lon_last;
+    e["samp"]     = kv.second.samples;
+  }
+  serializeJson(doc, f);
   f.close();
-  Serial.printf("[SKY-SPY] Registry: added '%s'\n", id);
+  SD_MMC.remove(SS_REG_PATH);
+  SD_MMC.rename(SS_REG_TMP_PATH, SS_REG_PATH);
+  Serial.printf("[SKY-SPY] Registry saved (%u entries)\n", (unsigned)ssRegistry.size());
+}
+
+// Returns sessions_seen (1=brand new, >1=repeat operator). 0 if no uas_id.
+static uint32_t ssRegistryUpdate(const char* uas_id, const char* op_id,
+                                  const char* mac,
+                                  double pilot_lat, double pilot_lon) {
+  if (!uas_id || !uas_id[0]) return 0;
+  bool isNew     = !ssRegistry.count(uas_id);
+  bool firstThis = !ssSessionIds.count(uas_id);
+
+  // Evict lowest-sessions entry if at capacity
+  if (isNew && ssRegistry.size() >= SS_REG_MAX) {
+    auto evict = ssRegistry.begin();
+    for (auto it = ssRegistry.begin(); it != ssRegistry.end(); ++it) {
+      if (it->second.sessions < evict->second.sessions) evict = it;
+    }
+    ssRegistry.erase(evict);
+  }
+
+  SsRegEntry& e = ssRegistry[uas_id];
+  bool needsSave = false;
+
+  if (isNew) {
+    e = {};
+    e.sessions = 1;
+    ssSessionIds.insert(uas_id);
+    needsSave = true;
+  } else if (firstThis) {
+    e.sessions++;
+    ssSessionIds.insert(uas_id);
+    needsSave = true;
+  }
+
+  if (op_id && op_id[0]) strncpy(e.op_id, op_id, sizeof(e.op_id) - 1);
+  if (mac   && mac[0])   strncpy(e.mac,   mac,   sizeof(e.mac)   - 1);
+
+  if (pilot_lat != 0.0 || pilot_lon != 0.0) {
+    e.pilot_lat_last = pilot_lat;
+    e.pilot_lon_last = pilot_lon;
+    if (e.samples == 0) {
+      e.pilot_lat = pilot_lat;
+      e.pilot_lon = pilot_lon;
+    } else {
+      e.pilot_lat = (e.pilot_lat * e.samples + pilot_lat) / (e.samples + 1);
+      e.pilot_lon = (e.pilot_lon * e.samples + pilot_lon) / (e.samples + 1);
+    }
+    e.samples++;
+  }
+
+  if (needsSave) ssRegistrySave();
+  return e.sessions;
 }
 #endif
 
@@ -614,12 +705,17 @@ static void refreshDisplay(unsigned long now) {
              uavs[bestIdx].mac[0], uavs[bestIdx].mac[1],
              uavs[bestIdx].mac[2], uavs[bestIdx].mac[3],
              uavs[bestIdx].mac[4], uavs[bestIdx].mac[5]);
-    // Registry: determine if this drone is new this session
-    bool isNew = false;
+    // Registry: look up drone and update cross-session tracking
+    int sessionsSeen = 0;
 #if HAS_SD_CARD
     if (uavs[bestIdx].uav_id[0]) {
-      isNew = !ssKnownIds.count(uavs[bestIdx].uav_id);
-      if (isNew) ssRegistryAdd(uavs[bestIdx].uav_id);
+      sessionsSeen = (int)ssRegistryUpdate(
+        uavs[bestIdx].uav_id,
+        uavs[bestIdx].op_id,
+        mac_str,
+        uavs[bestIdx].base_lat_d,
+        uavs[bestIdx].base_long_d
+      );
     }
 #endif
     display_skyspy(mac_str, uavs[bestIdx].uav_id,
@@ -631,7 +727,7 @@ static void refreshDisplay(unsigned long now) {
 #else
                    0,
 #endif
-                   ssCurrentChannel, isNew);
+                   ssCurrentChannel, sessionsSeen);
   } else {
     display_skyspy_scanning(total,
 #if HAS_GPS

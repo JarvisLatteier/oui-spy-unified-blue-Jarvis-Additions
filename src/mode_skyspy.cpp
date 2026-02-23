@@ -52,6 +52,8 @@
 
 #if HAS_SD_CARD
 #include <SD_MMC.h>
+#include <ArduinoJson.h>
+#include <map>
 #include <set>
 #include <string>
 #endif

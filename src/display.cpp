@@ -262,7 +262,7 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
 void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     int alt, int rssi, int total,
                     double /*pilotLat*/, double /*pilotLon*/,
-                    int /*gpsSats*/, int wifiCh, bool /*isNew*/) {
+                    int /*gpsSats*/, int wifiCh, int /*sessionsSeen*/) {
     spr.fillSprite(C_BG);
     drawHeader("SKY SPY");
 

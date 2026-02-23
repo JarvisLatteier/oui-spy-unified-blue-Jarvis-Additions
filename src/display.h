@@ -28,7 +28,7 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
 void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     int alt, int rssi, int total,
                     double pilotLat = 0, double pilotLon = 0,
-                    int gpsSats = 0, int wifiCh = 6, bool isNew = false);
+                    int gpsSats = 0, int wifiCh = 6, int sessionsSeen = 0);
 void display_skyspy_scanning(int count, double devLat = 0, double devLon = 0,
                              int gpsSats = 0, int wifiCh = 6);
 void display_sd_status(bool inserted, int fileCount);
@@ -70,7 +70,7 @@ inline void display_flockyou(int, int, bool, const char*, const char*, int,
                              bool = false) {}
 inline void display_skyspy(const char*, const char*, double, double,
                            int, int, int,
-                           double = 0, double = 0, int = 0, int = 6, bool = false) {}
+                           double = 0, double = 0, int = 0, int = 6, int = 0) {}
 inline void display_skyspy_scanning(int, double = 0, double = 0, int = 0, int = 6) {}
 inline void display_sd_status(bool, int) {}
 inline int  display_skyspy_touch() { return 0; }
