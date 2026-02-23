@@ -121,6 +121,8 @@ static const uint8_t SS_REG_SAMPLE_MAX   = 50;     // max pilot GPS points store
 static const double  SS_SAMPLE_MIN_DIST  = 0.0002; // ~22m in degrees — dedup radius
 static const char    SS_REG_PATH[]       = "/oui-spy/skyspy/registry.json";
 static const char    SS_REG_TMP_PATH[]   = "/oui-spy/skyspy/registry.tmp";
+static const char    SS_STATS_PATH[]     = "/oui-spy/stats.json";
+static const char    SS_STATS_TMP_PATH[] = "/oui-spy/stats.tmp";
 
 struct SsRegEntry {
   uint32_t sessions;           // total sessions seen across all power cycles
@@ -266,6 +268,45 @@ static uint32_t ssRegistryUpdate(const char* uas_id, const char* op_id,
   return e.sessions;
 }
 
+static void ssUpdateStats(int sessionDrones, unsigned long durationS) {
+  // Load existing stats (zeros if file doesn't exist)
+  uint32_t prevSessions   = 0;
+  uint32_t prevDurationS  = 0;
+
+  File rf = SD_MMC.open(SS_STATS_PATH, "r");
+  if (rf) {
+    JsonDocument rdoc;
+    if (!deserializeJson(rdoc, rf)) {
+      JsonObject ss = rdoc["skyspy"];
+      prevSessions  = ss["sessions"]        | 0u;
+      prevDurationS = ss["total_duration_s"] | 0u;
+    }
+    rf.close();
+  }
+
+  // Compute fresh totals from registry (source of truth for unique/detection counts)
+  uint32_t uniqueDrones     = (uint32_t)ssRegistry.size();
+  uint32_t totalDetections  = 0;
+  for (auto& kv : ssRegistry) totalDetections += kv.second.sessions;
+
+  JsonDocument wdoc;
+  wdoc["v"] = 1;
+  JsonObject ss        = wdoc["skyspy"].to<JsonObject>();
+  ss["sessions"]         = prevSessions + 1;
+  ss["unique_drones"]    = uniqueDrones;
+  ss["total_detections"] = totalDetections;
+  ss["total_duration_s"] = prevDurationS + (uint32_t)durationS;
+
+  File wf = SD_MMC.open(SS_STATS_TMP_PATH, FILE_WRITE);
+  if (!wf) { Serial.println("[SKY-SPY] Stats write failed"); return; }
+  serializeJson(wdoc, wf);
+  wf.close();
+  SD_MMC.remove(SS_STATS_PATH);
+  SD_MMC.rename(SS_STATS_TMP_PATH, SS_STATS_PATH);
+  Serial.printf("[SKY-SPY] Stats: %u sessions, %u drones, %u detections\n",
+                prevSessions + 1, uniqueDrones, totalDetections);
+}
+
 static void ssWriteSessionSummary() {
   const char* sessionPath = sdlog_session_path();
   if (!sessionPath) return;  // no detections this session — nothing to summarise
@@ -321,7 +362,8 @@ static void ssWriteSessionSummary() {
     f.close();
     Serial.printf("[SKY-SPY] Session summary: %s\n", summaryPath);
   }
-  ssRegistrySave();  // flush any unsaved registry changes
+  ssRegistrySave();             // flush any unsaved registry changes
+  ssUpdateStats(totalDrones, durationS);  // update lifetime stats
 }
 #endif
 
