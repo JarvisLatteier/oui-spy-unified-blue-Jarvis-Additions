@@ -37,6 +37,13 @@
 #include <TinyGPSPlus.h>
 #endif
 
+#if HAS_SD_CARD
+#include <SD_MMC.h>
+#include <map>
+#include <set>
+#include <string>
+#endif
+
 // Pin overrides for T-Dongle-S3
 #ifdef BOARD_TDONGLE_S3
   #undef BUZZER_PIN

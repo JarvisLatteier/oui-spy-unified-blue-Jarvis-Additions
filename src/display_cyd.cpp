@@ -461,10 +461,14 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
     if (mac && mac[0]) {
         g.setTextColor(C_WARN, C_BG);
         g.drawString(mac, 8, CNT_Y + 32, 2);
-        if (sightings > 1) {
+        if (sightings > 0) {
             char cntBuf[8];
-            snprintf(cntBuf, sizeof(cntBuf), "x%d", sightings);
-            g.setTextColor(C_DIM, C_BG);
+            if (sightings == 1) {
+                snprintf(cntBuf, sizeof(cntBuf), "NEW");
+            } else {
+                snprintf(cntBuf, sizeof(cntBuf), "x%d", sightings);
+            }
+            g.setTextColor(sightings == 1 ? C_WARN : C_DIM, C_BG);
             g.setTextDatum(TR_DATUM);
             g.drawString(cntBuf, SCR_W - 8, CNT_Y + 32, 2);
             g.setTextDatum(TL_DATUM);

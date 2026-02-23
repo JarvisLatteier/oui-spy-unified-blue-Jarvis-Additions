@@ -409,6 +409,123 @@ static void fyAttachGPS(FYDetection& d) {
 }
 
 // ============================================================================
+// PERSISTENT DEVICE REGISTRY (cross-session SD card tracking)
+// ============================================================================
+
+#if HAS_SD_CARD
+static const uint16_t FY_REG_MAX        = 500;
+static const char     FY_REG_PATH[]     = "/oui-spy/flockyou/registry.json";
+static const char     FY_REG_TMP_PATH[] = "/oui-spy/flockyou/registry.tmp";
+
+struct FYRegEntry {
+    char     type[8];      // "flock" or "raven"
+    uint32_t sightings;    // sessions seen across all power cycles
+    double   lat;          // last GPS lat
+    double   lon;          // last GPS lon
+    bool     hasGPS;
+};
+
+static std::map<std::string, FYRegEntry> fyRegistry;
+static std::set<std::string>             fySessionMacs;   // MACs updated this session
+static SemaphoreHandle_t                 fyRegMutex = nullptr;
+static volatile bool                     fyRegistryDirty = false;
+
+static void fyRegistryLoad() {
+    File f = SD_MMC.open(FY_REG_PATH, "r");
+    if (!f) { Serial.println("[FY] No registry yet"); return; }
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, f);
+    f.close();
+    if (err) { Serial.printf("[FY] Registry parse error: %s\n", err.c_str()); return; }
+    for (JsonObject e : doc["entries"].as<JsonArray>()) {
+        const char* mac = e["mac"] | "";
+        if (!mac[0]) continue;
+        FYRegEntry r = {};
+        r.sightings = e["s"]   | 1u;
+        r.lat       = e["lat"] | 0.0;
+        r.lon       = e["lon"] | 0.0;
+        r.hasGPS    = e["gps"] | false;
+        strncpy(r.type, e["tp"] | "flock", sizeof(r.type) - 1);
+        fyRegistry[mac] = r;
+    }
+    Serial.printf("[FY] Registry: %u known devices\n", (unsigned)fyRegistry.size());
+}
+
+// Called from loop() — SD write outside BLE callback context
+static void fyRegistrySave() {
+    if (!fyRegMutex || xSemaphoreTake(fyRegMutex, pdMS_TO_TICKS(500)) != pdTRUE) return;
+    File f = SD_MMC.open(FY_REG_TMP_PATH, FILE_WRITE);
+    if (!f) {
+        Serial.println("[FY] Registry save: open failed");
+        xSemaphoreGive(fyRegMutex);
+        return;
+    }
+    JsonDocument doc;
+    doc["v"] = 1;
+    JsonArray arr = doc["entries"].to<JsonArray>();
+    for (auto& kv : fyRegistry) {
+        JsonObject e = arr.add<JsonObject>();
+        e["mac"]  = kv.first.c_str();
+        e["tp"]   = kv.second.type;
+        e["s"]    = kv.second.sightings;
+        e["lat"]  = kv.second.lat;
+        e["lon"]  = kv.second.lon;
+        e["gps"]  = kv.second.hasGPS;
+    }
+    serializeJson(doc, f);
+    f.close();
+    SD_MMC.remove(FY_REG_PATH);
+    SD_MMC.rename(FY_REG_TMP_PATH, FY_REG_PATH);
+    fyRegistryDirty = false;
+    xSemaphoreGive(fyRegMutex);
+    Serial.printf("[FY] Registry saved (%u entries)\n", (unsigned)fyRegistry.size());
+}
+
+// Called from BLE callback — map update only, no SD I/O
+// Returns lifetime sightings for this device (1=new, >1=repeat). 0 if mac empty.
+static uint32_t fyRegistryUpdate(const char* mac, bool isRaven,
+                                  double lat, double lon) {
+    if (!mac || !mac[0]) return 0;
+    if (!fyRegMutex || xSemaphoreTake(fyRegMutex, pdMS_TO_TICKS(50)) != pdTRUE) return 0;
+
+    bool isNew     = !fyRegistry.count(mac);
+    bool firstThis = !fySessionMacs.count(mac);
+
+    // Evict lowest-sightings entry if at capacity
+    if (isNew && fyRegistry.size() >= FY_REG_MAX) {
+        auto evict = fyRegistry.begin();
+        for (auto it = fyRegistry.begin(); it != fyRegistry.end(); ++it) {
+            if (it->second.sightings < evict->second.sightings) evict = it;
+        }
+        fyRegistry.erase(evict);
+    }
+
+    FYRegEntry& e = fyRegistry[mac];
+    if (isNew) {
+        e = {};
+        e.sightings = 1;
+        strncpy(e.type, isRaven ? "raven" : "flock", sizeof(e.type) - 1);
+        fySessionMacs.insert(mac);
+        fyRegistryDirty = true;
+    } else if (firstThis) {
+        e.sightings++;
+        fySessionMacs.insert(mac);
+        fyRegistryDirty = true;
+    }
+
+    if (lat != 0.0 || lon != 0.0) {
+        e.lat    = lat;
+        e.lon    = lon;
+        e.hasGPS = true;
+    }
+
+    uint32_t result = e.sightings;
+    xSemaphoreGive(fyRegMutex);
+    return result;
+}
+#endif
+
+// ============================================================================
 // DETECTION MANAGEMENT
 // ============================================================================
 
@@ -562,6 +679,15 @@ class FYBLECallbacks : public NimBLEAdvertisedDeviceCallbacks {
             fyLastDetTime = millis();
             fyLastHB = millis();
 
+#if HAS_SD_CARD
+            int lifetimeSightings = (int)fyRegistryUpdate(
+                addrStr.c_str(), isRaven,
+                fyGPSIsFresh() ? fyGPSLat : 0.0,
+                fyGPSIsFresh() ? fyGPSLon : 0.0
+            );
+#else
+            int lifetimeSightings = 0;
+#endif
 #ifdef ENABLE_TFT_DISPLAY
             display_flockyou(fyDetCount, fyDeviceInRange ? 1 : 0,
                              fyBuzzerOn, addrStr.c_str(), method, rssi
@@ -571,7 +697,7 @@ class FYBLECallbacks : public NimBLEAdvertisedDeviceCallbacks {
                              , 0
 #endif
                              , name.c_str()
-                             , idx >= 0 ? fyDet[idx].count : 1
+                             , lifetimeSightings
                              , isRaven
                              , isRaven ? ravenFW : nullptr
                              , idx >= 0 && fyDet[idx].hasGPS
@@ -793,6 +919,7 @@ h4{color:#ec4899;font-size:14px;margin-bottom:8px}
 <button onclick="tab(1,this)">PREV</button>
 <button onclick="tab(2,this)">DB</button>
 <button onclick="tab(3,this)">TOOLS</button>
+<button onclick="tab(4,this)">HIST</button>
 </div>
 <div class="cn">
 <div class="pn a" id="p0">
@@ -822,13 +949,15 @@ h4{color:#ec4899;font-size:14px;margin-bottom:8px}
 <div class="incog"><input type="checkbox" id="incog" onchange="fyIncog(this.checked)"><label style="margin:0;display:inline;color:#c084fc">Incognito (kill display + LED)</label></div>
 </div>
 </div>
+<div class="pn" id="p4"><div id="regL"><div class="empty">Loading registry...</div></div></div>
 </div>
 <script>
 let D=[],H=[];
 function fySetBr(){fetch('/brightness?disp='+document.getElementById('dspBr').value+'&led='+document.getElementById('ledBr').value);}
 function fyIncog(on){var d=on?0:document.getElementById('dspBr').value,l=on?0:document.getElementById('ledBr').value;fetch('/brightness?disp='+d+'&led='+l);}
 fetch('/brightness').then(r=>r.json()).then(j=>{document.getElementById('dspBr').value=j.disp;document.getElementById('dspVal').textContent=j.disp;document.getElementById('ledBr').value=j.led;document.getElementById('ledVal').textContent=j.led;}).catch(()=>{});
-function tab(i,el){document.querySelectorAll('.tb button').forEach(b=>b.classList.remove('a'));document.querySelectorAll('.pn').forEach(p=>p.classList.remove('a'));el.classList.add('a');document.getElementById('p'+i).classList.add('a');if(i===1&&!window._hL)loadHistory();if(i===2&&!window._pL)loadPat();}
+function tab(i,el){document.querySelectorAll('.tb button').forEach(b=>b.classList.remove('a'));document.querySelectorAll('.pn').forEach(p=>p.classList.remove('a'));el.classList.add('a');document.getElementById('p'+i).classList.add('a');if(i===1&&!window._hL)loadHistory();if(i===2&&!window._pL)loadPat();if(i===4&&!window._rL)loadReg();}
+function loadReg(){fetch('/api/registry').then(r=>r.json()).then(j=>{let E=j.entries||[];let el=document.getElementById('regL');if(!E.length){el.innerHTML='<div class="empty">No registry data yet.<br>Devices are tracked across sessions on SD card.</div>';window._rL=1;return;}E.sort((a,b)=>b.s-a.s);el.innerHTML='<div style="font-size:11px;color:#8b5cf6;margin-bottom:8px">'+E.length+' known devices (lifetime)</div>'+E.map(e=>'<div class="det"><div class="mac">'+e.mac+'<span class="nm">'+(e.tp==='raven'?'RAVEN':'FLOCK')+'</span></div><div class="inf"><span style="color:#ec4899;font-weight:bold">&times;'+e.s+' sessions</span>'+(e.gps?'<span style="color:#22c55e">&#9673; '+e.lat.toFixed(5)+','+e.lon.toFixed(5)+'</span>':'<span style="color:#666">no gps</span>')+'</div></div>').join('');window._rL=1;}).catch(()=>{document.getElementById('regL').innerHTML='<div class="empty">Registry unavailable (no SD card)</div>';});}
 function refresh(){fetch('/api/detections').then(r=>r.json()).then(d=>{D=d;render();stats();}).catch(()=>{});}
 function render(){const el=document.getElementById('dL');if(!D.length){el.innerHTML='<div class="empty">Scanning for surveillance devices...<br>BLE active on all channels</div>';return;}
 D.sort((a,b)=>b.last-a.last);el.innerHTML=D.map(card).join('');}
@@ -1117,6 +1246,25 @@ static void fySetupServer() {
         request->send(200, "application/json", json);
     });
 
+    // API: Cross-session device registry (SD card)
+    fyServer.on("/api/registry", HTTP_GET, [](AsyncWebServerRequest *r) {
+#if HAS_SD_CARD
+        File f = SD_MMC.open(FY_REG_PATH, "r");
+        if (f) {
+            AsyncResponseStream *resp = r->beginResponseStream("application/json");
+            uint8_t buf[256];
+            while (f.available()) {
+                int n = f.read(buf, sizeof(buf));
+                if (n > 0) resp->write(buf, n);
+            }
+            f.close();
+            r->send(resp);
+            return;
+        }
+#endif
+        r->send(200, "application/json", "{\"v\":1,\"entries\":[]}");
+    });
+
     fyServer.begin();
     printf("[FLOCK-YOU] Web server started on port 80\n");
 }
@@ -1170,6 +1318,11 @@ void setup() {
     } else {
         printf("[FLOCK-YOU] SPIFFS init failed - no persistence\n");
     }
+
+#if HAS_SD_CARD
+    fyRegMutex = xSemaphoreCreateMutex();
+    if (sdlog_available()) fyRegistryLoad();
+#endif
 
     printf("\n========================================\n");
     printf("  FLOCK-YOU Surveillance Detector\n");
@@ -1285,6 +1438,11 @@ void loop() {
 #endif
                          );
     }
+#endif
+
+#if HAS_SD_CARD
+    // Flush registry to SD card if changed (done in loop to avoid blocking BLE callback)
+    if (fyRegistryDirty) fyRegistrySave();
 #endif
 
     // Auto-save session to SPIFFS every 15s if detections changed
