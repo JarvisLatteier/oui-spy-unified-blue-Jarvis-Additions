@@ -116,9 +116,11 @@ static int    ssDevSats = 0;
 
 // Persistent drone registry (cross-session tracking via JSON on SD card)
 #if HAS_SD_CARD
-static const uint8_t SS_REG_MAX        = 100;
-static const char    SS_REG_PATH[]     = "/oui-spy/skyspy/registry.json";
-static const char    SS_REG_TMP_PATH[] = "/oui-spy/skyspy/registry.tmp";
+static const uint8_t SS_REG_MAX          = 100;
+static const uint8_t SS_REG_SAMPLE_MAX   = 50;     // max pilot GPS points stored per operator
+static const double  SS_SAMPLE_MIN_DIST  = 0.0002; // ~22m in degrees — dedup radius
+static const char    SS_REG_PATH[]       = "/oui-spy/skyspy/registry.json";
+static const char    SS_REG_TMP_PATH[]   = "/oui-spy/skyspy/registry.tmp";
 
 struct SsRegEntry {
   uint32_t sessions;           // total sessions seen across all power cycles
@@ -129,6 +131,7 @@ struct SsRegEntry {
   uint32_t samples;            // sample count for centroid averaging
   char     op_id[ODID_ID_SIZE + 1];
   char     mac[18];
+  std::vector<std::pair<double,double>> pilot_pts;  // individual launch-site samples
 };
 
 static std::map<std::string, SsRegEntry> ssRegistry;    // loaded at startup
@@ -153,6 +156,10 @@ static void ssRegistryLoad() {
     r.samples        = e["samp"]  | 0u;
     strncpy(r.op_id, e["op"]  | "", sizeof(r.op_id) - 1);
     strncpy(r.mac,   e["mac"] | "", sizeof(r.mac)   - 1);
+    for (JsonArray pt : e["pts"].as<JsonArray>()) {
+      if (pt.size() >= 2)
+        r.pilot_pts.push_back({pt[0].as<double>(), pt[1].as<double>()});
+    }
     ssRegistry[id] = r;
   }
   Serial.printf("[SKY-SPY] Registry: %u known drones\n", (unsigned)ssRegistry.size());
@@ -175,6 +182,14 @@ static void ssRegistrySave() {
     e["pllat"]    = kv.second.pilot_lat_last;
     e["pllon"]    = kv.second.pilot_lon_last;
     e["samp"]     = kv.second.samples;
+    if (!kv.second.pilot_pts.empty()) {
+      JsonArray pts = e["pts"].to<JsonArray>();
+      for (auto& pt : kv.second.pilot_pts) {
+        JsonArray p = pts.add<JsonArray>();
+        p.add(pt.first);
+        p.add(pt.second);
+      }
+    }
   }
   serializeJson(doc, f);
   f.close();
@@ -228,6 +243,23 @@ static uint32_t ssRegistryUpdate(const char* uas_id, const char* op_id,
       e.pilot_lon = (e.pilot_lon * e.samples + pilot_lon) / (e.samples + 1);
     }
     e.samples++;
+
+    // Add to individual sample list if far enough from all existing points (~22m dedup)
+    bool tooClose = false;
+    for (auto& pt : e.pilot_pts) {
+      double dlat = pt.first  - pilot_lat;
+      double dlon = pt.second - pilot_lon;
+      if (dlat*dlat + dlon*dlon < SS_SAMPLE_MIN_DIST * SS_SAMPLE_MIN_DIST) {
+        tooClose = true;
+        break;
+      }
+    }
+    if (!tooClose) {
+      if (e.pilot_pts.size() >= SS_REG_SAMPLE_MAX)
+        e.pilot_pts.erase(e.pilot_pts.begin());  // drop oldest when full
+      e.pilot_pts.push_back({pilot_lat, pilot_lon});
+      needsSave = true;
+    }
   }
 
   if (needsSave) ssRegistrySave();
