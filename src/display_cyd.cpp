@@ -631,11 +631,11 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
             char url[128];
             if (pilotLat != 0.0 || pilotLon != 0.0) {
                 snprintf(url, sizeof(url),
-                    "https://maps.google.com/maps?saddr=%.6f,%.6f&daddr=%.6f,%.6f",
+                    "https://maps.apple.com/?saddr=%.6f,%.6f&daddr=%.6f,%.6f",
                     pilotLat, pilotLon, lat, lon);
             } else {
                 snprintf(url, sizeof(url),
-                    "https://maps.google.com/maps?q=%.6f,%.6f",
+                    "https://maps.apple.com/?q=%.6f,%.6f",
                     lat, lon);
             }
 

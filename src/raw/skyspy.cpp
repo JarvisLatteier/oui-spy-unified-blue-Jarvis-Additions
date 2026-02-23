@@ -926,14 +926,16 @@ void setup() {
 #endif
   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   pBLEScan->setActiveScan(true);
+#ifdef BOARD_CYD_S3
+  // Low duty-cycle scan so GATT advertising has radio airtime.
+  // Interval=320 (200ms), Window=32 (20ms) → 10% scan, 90% free for advertising.
+  pBLEScan->setInterval(320);
+  pBLEScan->setWindow(32);
+#endif
 
   printQueue = xQueueCreate(MAX_UAVS, sizeof(id_data));
 
-#ifndef BOARD_CYD_S3
-  // CYD: BLE scan omitted — radio dedicated to GATT advertising (phone push).
-  // WiFi promiscuous mode handles drone detection on CYD.
   xTaskCreatePinnedToCore(bleScanTask, "BLEScanTask", 4096, NULL, 1, NULL, 1);
-#endif
   xTaskCreatePinnedToCore(printerTask, "PrinterTask", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(buzzerTask, "BuzzerTask", 4096, NULL, 1, NULL, 1);
   Serial.printf("[SKY-SPY] Ready, heap: %u bytes\n", ESP.getFreeHeap());
