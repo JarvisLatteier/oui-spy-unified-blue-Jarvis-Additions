@@ -116,7 +116,6 @@
 #define TOUCH_SDA_PIN   16
 #define TOUCH_SCL_PIN   15
 #define TOUCH_RST_PIN   18
-#define TOUCH_INT_PIN   17
 #define TOUCH_I2C_ADDR  0x38
 
 // GPS UART (UART0, free since USB CDC handles Serial)

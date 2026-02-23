@@ -36,6 +36,8 @@ On first power-up the device enters **Selector Mode** (mode 0). From here you ch
 2. Open **http://192.168.4.1** in a browser
 3. Tap a mode to select it — the device reboots into that mode
 
+> 📷 **[Photo: Selector web UI in browser showing mode buttons and SSID/password fields]**
+
 **TFT menu (T-Dongle only):**
 - **Short press** BOOT button to cycle through modes on the display
 - **Long press** (1.5s) BOOT button to confirm and boot into the highlighted mode
@@ -85,6 +87,8 @@ Scans for specific BLE devices by MAC address or OUI prefix and alerts when they
 - Lock configuration to prevent accidental edits
 - Brightness sliders (display + LED)
 
+> 📷 **[Photo: Detector web dashboard showing OUI filter list and live detection table]**
+
 ## Mode 2: Foxhunter (XIAO / T-Dongle only)
 
 Track down a single BLE device using RSSI signal strength — beeps get faster as you get closer.
@@ -92,6 +96,9 @@ Track down a single BLE device using RSSI signal strength — beeps get faster a
 1. Connect to WiFi AP **foxhunter** (password: **foxhunter**)
 2. Open **http://192.168.4.1**
 3. Enter the target MAC address and tap **Save**
+
+> 📷 **[Photo: Foxhunter config page showing MAC address input field and Save button]**
+
 4. Walk around — beep speed indicates proximity:
 
 | Signal Strength | Beep Interval |
@@ -123,14 +130,16 @@ Detects Flock Safety surveillance cameras and Raven gunshot detectors via BLE.
 **Dashboard features:**
 - Real-time detection list with signal strength
 - Detection statistics and Raven count
-- **Export options**: JSON, CSV, or KML (for Google Earth)
+- **Export options**: JSON, CSV, KML (current session), or all-time wardriving KML (from persistent registry — all sessions)
 - Session history with archiving
 - **History tab** — persistent cross-session device registry
 - GPS wardriving — your phone's browser can share its location via the dashboard, tagging each detection with coordinates
 
-> 📷 **[Photo: Flock-You web dashboard main detection tab]**
+> 📷 **[Photo: Flock-You web dashboard main detection tab with detection list and signal bars]**
 
 > 📷 **[Photo: Flock-You web dashboard HIST tab showing persistent registry]**
+
+> 📷 **[Photo: Flock-You export buttons — DOWNLOAD KML and DOWNLOAD ALL-TIME KML]**
 
 **GPS (CYD only):** The onboard GPS module automatically tags detections with coordinates without needing a phone.
 
@@ -141,6 +150,8 @@ The CYD shows each detection with a **NEW** or **×N** badge:
 - **×N** (dim) — camera has been seen N total times in previous sessions
 
 > 📷 **[Photo: CYD showing a Flock-You detection with NEW badge]**
+
+> 📷 **[Photo: CYD showing a Flock-You detection with ×47 repeat badge]**
 
 ### Persistent Device Registry
 
@@ -158,6 +169,17 @@ Flock-You maintains a cross-session camera database on the SD card at `/oui-spy/
 - Writes are atomic: temporary file written first, then renamed over the live registry
 - Registry capped at ~1000 entries; oldest (by last_seen) are evicted if over limit
 - Web dashboard exposes `/api/registry` — the HIST tab uses this to display the full history
+
+### All-Time Wardriving KML
+
+The **DOWNLOAD ALL-TIME KML** button exports the persistent registry as a KML file for Google Earth or Maps. Unlike the per-session export, this covers every camera ever detected across all sessions on this device:
+
+- One placemark per device with GPS coordinates
+- Flock cameras and Raven gunshot detectors use distinct map styles (different icon colours and scales)
+- Placemark description includes device type, lifetime sighting count, and alias (if set)
+- File downloads as `flockyou_wardriving.kml` — open directly in Google Earth or import to Google My Maps
+
+> 📷 **[Photo: Google Earth with flockyou_wardriving.kml loaded, showing camera density across an area]**
 
 ## Mode 5: Sky Spy
 
@@ -239,6 +261,18 @@ The CYD serves a Web Bluetooth client page at `http://192.168.4.1/ble`. Download
 
 > 📷 **[Photo: Sky Spy BLE web page on Android showing drone card with OPEN IN MAPS]**
 
+#### GitHub Pages Live Map (Android Chrome, internet required)
+
+A hosted Leaflet.js map is available at the project's GitHub Pages URL. No file download needed — open the page in Chrome on Android, tap **CONNECT BLE**, and the map updates live.
+
+- Dark CartoDB base map with live drone marker (red glow) and pilot marker (yellow glow)
+- Flight trail — last 120 position fixes drawn as a red polyline
+- Dashed line from pilot launch point to current drone position
+- Info panel: drone ID, coordinates, altitude, speed, heading, RSSI, GPS sat count, pilot distance (haversine)
+- **OPEN IN MAPS** → Google Maps turn-by-turn directions from pilot to drone
+
+> 📷 **[Photo: GitHub Pages live map in Chrome showing drone and pilot markers on dark map]**
+
 #### iOS — nRF Connect or LightBlue
 
 Web Bluetooth is not supported in iOS Safari. Use the free **nRF Connect** (Nordic Semiconductor) or **LightBlue** (PunchThrough) app:
@@ -286,16 +320,66 @@ Sky Spy maintains a cross-session drone operator database on the SD card at `/ou
 - UAS ID (FAA-assigned, primary key — stable across flights)
 - Operator ID
 - Sessions seen (count of separate power-cycle detection sessions)
-- First seen / last seen timestamps
-- Pilot location centroid (averaged across all sessions)
+- Pilot location centroid (running average across all sessions)
 - Most recent pilot launch location
 - Last seen BLE MAC
+- Up to 50 individual pilot GPS samples (deduplicated, ~22m minimum spacing) for future heatmap use
 
 **How it works:**
 - Registry loads at mode startup
 - First detection of an operator per session increments their session count and updates the centroid
 - Write-back is atomic (tmp → rename) and only triggered on new entries or new session detections, not every display refresh
 - The **×N** badge on the CYD drone screen shows how many separate sessions this operator has been seen in — after a few passes in an area, repeat operators become obvious immediately
+
+### Session Summary (on clean exit)
+
+When you hold the BOOT button to return to the Selector from Sky Spy, the firmware writes a per-session summary JSON before rebooting.
+
+**File:** `/oui-spy/skyspy/session_NNNNNN_summary.json`
+
+```json
+{
+  "v": 1,
+  "mode": 5,
+  "session": 4,
+  "duration_s": 1823,
+  "total": 3,
+  "new": 1,
+  "drones": [
+    {"uas_id": "UA12345", "sessions": 2, "op_id": "FAAoperatorXX",
+     "pilot_lat": 37.7749, "pilot_lon": -122.4194,
+     "mac": "AA:BB:CC:DD:EE:FF", "rssi": -68}
+  ]
+}
+```
+
+- `total` — unique drone operators seen this session
+- `new` — operators not previously in the registry
+- `drones[]` — one entry per UAS ID with registry data included
+
+If no detections occurred (no session file was created), no summary is written.
+
+> 📷 **[Photo: session summary JSON open in a text editor alongside Google Maps with pilot pin]**
+
+### Global Lifetime Stats
+
+Each session summary also updates `/oui-spy/stats.json` at the SD card root:
+
+```json
+{
+  "sessions": 12,
+  "unique_drones": 7,
+  "total_detections": 34,
+  "total_duration_s": 18600
+}
+```
+
+- `sessions` — clean-exit sessions (crashes and power-loss do not count)
+- `unique_drones` — total distinct UAS IDs ever recorded
+- `total_detections` — sum of all per-operator session counts across the registry
+- `total_duration_s` — cumulative Sky Spy scanning time
+
+> 📷 **[Photo: stats.json open showing lifetime totals after multiple field sessions]**
 
 ## SD Card Logging
 
@@ -311,7 +395,9 @@ The T-Dongle and CYD support SD card logging. Insert a FAT32-formatted micro SD 
     registry.json
   skyspy/
     session_000001.jsonl
+    session_000001_summary.json   ← written on clean BOOT-hold exit
     registry.json
+stats.json                        ← global lifetime totals (Sky Spy)
 ```
 
 - Logs are JSONL format (one JSON object per line)
@@ -639,6 +725,9 @@ Moved `board_config.h` to first include in all wrapper files for consistency wit
 - Removed unused `writeTestTone()` function from `cyd_audio.cpp`
 - Removed unused `BUZZER_DUTY` macro and `extern buzzerVolume` from `mode_skyspy.cpp`
 - Removed unused `ssDispLed` / `ssDispTone` variables from `display_cyd.cpp`
+- Removed `getASCIIArt()` from `raw/detector.cpp` (175 lines) and `raw/foxhunter.cpp` (188 lines) — the function was never called in either file; the ASCII art placeholder was already being replaced with an empty string at the call site. Combined ~363 lines removed, recovering ~13KB of flash on XIAO and T-Dongle builds.
+- Removed unused `#define TOUCH_INT_PIN 17` from `board_config.h` — CYD touch uses polling, not interrupt
+- Removed unused `#include <esp_log.h>` from `mode_detector.cpp`
 
 ### Debug Print Cleanup
 
@@ -880,6 +969,78 @@ Space is checked at the start of each session (`sdlog_start_session()`). Two new
 
 ---
 
+## 15. Flock-You All-Time Wardriving KML
+
+Added a cross-session wardriving KML export to Flock-You. The existing "DOWNLOAD KML (GPS MAP)" button exports only the current session's in-memory detections. The new "DOWNLOAD ALL-TIME KML" button exports from the persistent SD registry — every camera ever seen across all sessions on this device.
+
+### KML Output
+
+- One KML Placemark per device with GPS coordinates (`hasGPS = true`)
+- Two visual styles: `det` (blue-tinted icon, 1.0× scale) for Flock cameras; `raven` (red-tinted, 1.2× scale) for Raven gunshot detectors
+- Placemark `<description>` includes: type, total lifetime sightings, alias (if set)
+- Filename: `flockyou_wardriving.kml` — opens directly in Google Earth or imports to Google My Maps
+- Endpoint: `/api/wardriving/kml` (HTTP GET)
+
+### Guard
+
+Both `writeRegistryKML()` and the `/api/wardriving/kml` endpoint are wrapped in `#if HAS_SD_CARD`. On XIAO builds (no SD card) the function does not exist and the endpoint is not registered.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/raw/flockyou.cpp` | Added `writeRegistryKML()` (`#if HAS_SD_CARD`), `/api/wardriving/kml` endpoint (`#if HAS_SD_CARD`), "DOWNLOAD ALL-TIME KML" button in dashboard HTML |
+
+---
+
+## 16. Sky Spy Session Summary + Global Lifetime Stats
+
+### Session Summary on Clean Exit
+
+When the user holds BOOT to exit Sky Spy, `skyspy_session_end()` is called before `ESP.restart()`. This writes a per-session summary JSON file alongside the active session log file.
+
+**Path:** `/oui-spy/skyspy/session_NNNNNN_summary.json` (derived from the `.jsonl` path)
+
+If no session file was created (zero detections), no summary is written.
+
+**Summary fields:**
+
+| Field | Description |
+|-------|-------------|
+| `v` | File format version (1) |
+| `mode` | Always 5 (Sky Spy) |
+| `session` | Session number (matches the .jsonl file) |
+| `duration_s` | Seconds from mode startup to BOOT-hold exit |
+| `total` | Unique UAS IDs seen this session |
+| `new` | UAS IDs not previously in the registry |
+| `drones[]` | One entry per UAS ID: sessions, op_id, pilot_lat/lon, mac, rssi |
+
+### Global Lifetime Stats
+
+After writing the summary, `ssUpdateStats()` reads and updates `/oui-spy/stats.json` at the SD card root using an atomic tmp→rename write. The file accumulates totals across all clean-exit sessions:
+
+| Field | Description |
+|-------|-------------|
+| `sessions` | Total clean-exit Sky Spy sessions |
+| `unique_drones` | Total distinct UAS IDs across the registry |
+| `total_detections` | Sum of all per-operator session counts |
+| `total_duration_s` | Cumulative scanning time in seconds |
+
+Crashes and power-loss do not contribute to `sessions` or `total_duration_s`.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/raw/skyspy.cpp` | Added `ssSessionEnd()`, `ssWriteSessionSummary()`, `ssUpdateStats()`, `SS_STATS_PATH/TMP_PATH` constants, `ssSessionStartMs` tracking |
+| `src/modes.h` | Added `skyspy_session_end()` declaration |
+| `src/mode_skyspy.cpp` | Added `skyspy_session_end()` wrapper |
+| `src/main.cpp` | Calls `skyspy_session_end()` before `ESP.restart()` when `currentMode == 5` |
+| `src/sdlog.cpp` | Added `sdlog_session_path()` to expose current session file path |
+| `src/sdlog.h` | Added `sdlog_session_path()` declaration |
+
+---
+
 ## Build Verification
 
 All three environments build successfully with all changes:
@@ -887,5 +1048,5 @@ All three environments build successfully with all changes:
 | Environment | RAM | Flash |
 |-------------|-----|-------|
 | `seeed_xiao_esp32s3` | 27.3% | 18.1% |
-| `lilygo_tdongle_s3` | 27.9% | 19.7% |
-| `freenove_cyd_s3` | 28.4% | 19.6% |
+| `lilygo_tdongle_s3` | 27.9% | 19.8% |
+| `freenove_cyd_s3` | 28.4% | 19.7% |

@@ -884,6 +884,45 @@ static void writeDetectionsKML(AsyncResponseStream *resp) {
     resp->print("</Document>\n</kml>");
 }
 
+// All-time wardriving KML — generated from persistent registry (all sessions)
+#if HAS_SD_CARD
+static void writeRegistryKML(AsyncResponseStream *resp) {
+    resp->print("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<kml xmlns=\"http://www.opengis.net/kml/2.2\">\n<Document>\n"
+                "<name>Flock-You All-Time Wardriving</name>\n"
+                "<description>All GPS-tagged detections across all sessions</description>\n");
+    resp->print("<Style id=\"det\"><IconStyle><color>ff4489ec</color>"
+                "<scale>1.0</scale></IconStyle></Style>\n"
+                "<Style id=\"raven\"><IconStyle><color>ff4444ef</color>"
+                "<scale>1.2</scale></IconStyle></Style>\n");
+
+    if (fyRegMutex && xSemaphoreTake(fyRegMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+        for (auto& kv : fyRegistry) {
+            if (!kv.second.hasGPS) continue;
+            resp->print("<Placemark>\n");
+            if (kv.second.alias[0])
+                resp->printf("<name>%s (%s)</name>\n", kv.second.alias, kv.first.c_str());
+            else
+                resp->printf("<name>%s</name>\n", kv.first.c_str());
+            resp->printf("<styleUrl>#%s</styleUrl>\n",
+                         strcmp(kv.second.type, "raven") == 0 ? "raven" : "det");
+            resp->print("<description><![CDATA[");
+            resp->printf("<b>Type:</b> %s<br/>"
+                         "<b>Sightings:</b> %u<br/>",
+                         kv.second.type, kv.second.sightings);
+            if (kv.second.alias[0])
+                resp->printf("<b>Alias:</b> %s<br/>", kv.second.alias);
+            resp->print("]]></description>\n");
+            resp->printf("<Point><coordinates>%.8f,%.8f,0</coordinates></Point>\n",
+                         kv.second.lon, kv.second.lat);
+            resp->print("</Placemark>\n");
+        }
+        xSemaphoreGive(fyRegMutex);
+    }
+    resp->print("</Document>\n</kml>");
+}
+#endif // HAS_SD_CARD
+
 // ============================================================================
 // DASHBOARD HTML
 // ============================================================================
@@ -957,6 +996,7 @@ h4{color:#ec4899;font-size:14px;margin-bottom:8px}
 <button class="btn" onclick="location.href='/api/export/json'">DOWNLOAD JSON</button>
 <button class="btn" onclick="location.href='/api/export/csv'">DOWNLOAD CSV</button>
 <button class="btn" onclick="location.href='/api/export/kml'" style="background:#22c55e">DOWNLOAD KML (GPS MAP)</button>
+<button class="btn" onclick="location.href='/api/wardriving/kml'" style="background:#16a34a">DOWNLOAD ALL-TIME KML</button>
 <hr class="sep">
 <h4>PRIOR SESSION</h4>
 <button class="btn" onclick="location.href='/api/history/json'" style="background:#6366f1">DOWNLOAD PREV JSON</button>
@@ -1158,6 +1198,16 @@ static void fySetupServer() {
         writeDetectionsKML(resp);
         r->send(resp);
     });
+
+#if HAS_SD_CARD
+    // API: All-time wardriving KML (from persistent registry, all sessions)
+    fyServer.on("/api/wardriving/kml", HTTP_GET, [](AsyncWebServerRequest *r) {
+        AsyncResponseStream *resp = r->beginResponseStream("application/vnd.google-earth.kml+xml");
+        resp->addHeader("Content-Disposition", "attachment; filename=\"flockyou_wardriving.kml\"");
+        writeRegistryKML(resp);
+        r->send(resp);
+    });
+#endif
 
     // API: Prior session history (JSON)
     fyServer.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *r) {

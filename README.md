@@ -144,11 +144,16 @@ See **[Jarvis' Additions.md](Jarvis'%20Additions.md)** for the full user guide, 
 - **CYD touch UI** — full selector, settings page, and in-mode touch controls for CYD
 - **I2S audio (CYD)** — ES8311 codec + NS4150 amp with non-blocking FreeRTOS tone task
 - **Sky Spy channel hopping** — scans WiFi CH1–13 with weighted CH6 dwell for NAN drone beacons
+- **Sky Spy live tracking (CYD)** — simultaneous WiFi AP dashboard (`http://192.168.4.1`) and BLE GATT push (Nordic UART Service) deliver real-time drone JSON to your phone every 2 seconds; also works via GitHub Pages Leaflet map over Web Bluetooth
+- **Sky Spy QR codes (CYD)** — scanning screen shows a LIVE MAP QR; drone screen generates an Apple Maps QR for turn-by-turn directions from pilot launch point to current drone position
 - **Sky Spy LED/TONE toggles** — CYD touch buttons with NVS persistence
-- **SD card improvements** — deferred file creation, per-mode file count footer, 64GB support
+- **Persistent registries** — cross-session JSON databases on SD card for both Sky Spy (drone operators, pilot centroid + GPS samples) and Flock-You (cameras with GPS coordinates); NEW/×N session-count badges on CYD
+- **Session summary + lifetime stats** — Sky Spy writes a per-session summary JSON and updates a global `/oui-spy/stats.json` on every clean BOOT-hold exit
+- **Flock-You wardriving KML** — all-time KML export from the persistent registry for Google Earth / Google My Maps
+- **SD card improvements** — deferred file creation, per-mode file count footer, 64GB support, low-space guard (SD:LOW / SD:FULL warnings)
 - **Brightness/incognito controls** — available in all modes that have a web server
 - **Initial display state** — modes draw their proper screen immediately after setup, not just on first event
-- **Debug cleanup** — removed debug Serial.println calls, dead code, heap diagnostics
+- **Dead code cleanup** — removed ~363 lines of unreachable ASCII art, debug Serial.println calls, unused includes and defines
 
 ---
 
