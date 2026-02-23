@@ -50,6 +50,12 @@
 #include <TinyGPSPlus.h>
 #endif
 
+#if HAS_SD_CARD
+#include <SD_MMC.h>
+#include <set>
+#include <string>
+#endif
+
 // Rename setup/loop
 #define setup skyspy_ns_setup
 #define loop  skyspy_ns_loop

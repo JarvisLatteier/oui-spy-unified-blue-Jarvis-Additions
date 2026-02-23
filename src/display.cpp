@@ -262,8 +262,7 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
 void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     int alt, int rssi, int total,
                     double /*pilotLat*/, double /*pilotLon*/,
-                    int /*gpsSats*/, int wifiCh,
-                    bool /*ledOn*/, bool /*toneOn*/) {
+                    int /*gpsSats*/, int wifiCh, bool /*isNew*/) {
     spr.fillSprite(C_BG);
     drawHeader("SKY SPY");
 
@@ -298,8 +297,7 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
 }
 
 void display_skyspy_scanning(int count, double /*devLat*/, double /*devLon*/,
-                             int /*gpsSats*/, int wifiCh,
-                             bool /*ledOn*/, bool /*toneOn*/) {
+                             int /*gpsSats*/, int wifiCh) {
     spr.fillSprite(C_BG);
     drawHeader("SKY SPY");
 
@@ -355,6 +353,7 @@ int  display_selector_touch() { return -1; }
 // Settings stubs (not available on T-Dongle)
 void display_settings(uint8_t, uint8_t, uint8_t, bool, bool) {}
 int  display_settings_touch() { return 0; }
+void display_skyspy_settings(uint8_t, uint8_t, uint8_t, bool, bool) {}
 
 // Sprite lifecycle stubs (not needed on T-Dongle, sprite is small)
 void display_free_sprite() {}

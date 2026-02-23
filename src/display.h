@@ -28,13 +28,13 @@ void display_flockyou(int count, int inRange, bool buzzer, const char* mac,
 void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     int alt, int rssi, int total,
                     double pilotLat = 0, double pilotLon = 0,
-                    int gpsSats = 0, int wifiCh = 6,
-                    bool ledOn = true, bool toneOn = true);
+                    int gpsSats = 0, int wifiCh = 6, bool isNew = false);
 void display_skyspy_scanning(int count, double devLat = 0, double devLon = 0,
-                             int gpsSats = 0, int wifiCh = 6,
-                             bool ledOn = true, bool toneOn = true);
+                             int gpsSats = 0, int wifiCh = 6);
 void display_sd_status(bool inserted, int fileCount);
-int  display_skyspy_touch();  // returns 1=LED toggle, 2=TONE toggle, 0=none
+int  display_skyspy_touch();  // returns 1=SETTINGS, 0=none
+void display_skyspy_settings(uint8_t dispBr, uint8_t ledBr, uint8_t vol,
+                             bool bleOn, bool incognito);
 void display_clear();
 void display_backlight(bool on);
 void display_set_brightness(uint8_t level);
@@ -70,12 +70,11 @@ inline void display_flockyou(int, int, bool, const char*, const char*, int,
                              bool = false) {}
 inline void display_skyspy(const char*, const char*, double, double,
                            int, int, int,
-                           double = 0, double = 0, int = 0, int = 6,
-                           bool = true, bool = true) {}
-inline void display_skyspy_scanning(int, double = 0, double = 0, int = 0, int = 6,
-                                    bool = true, bool = true) {}
+                           double = 0, double = 0, int = 0, int = 6, bool = false) {}
+inline void display_skyspy_scanning(int, double = 0, double = 0, int = 0, int = 6) {}
 inline void display_sd_status(bool, int) {}
 inline int  display_skyspy_touch() { return 0; }
+inline void display_skyspy_settings(uint8_t, uint8_t, uint8_t, bool, bool) {}
 inline void display_clear() {}
 inline void display_backlight(bool) {}
 inline void display_set_brightness(uint8_t) {}

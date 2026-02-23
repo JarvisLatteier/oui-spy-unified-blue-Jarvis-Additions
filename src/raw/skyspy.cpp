@@ -89,6 +89,36 @@ static double ssDevLon = 0;
 static int    ssDevSats = 0;
 #endif
 
+// Persistent drone registry (cross-session "seen before" tracking)
+#if HAS_SD_CARD
+static std::set<std::string> ssKnownIds;  // loaded from SD at startup, immutable during session
+static std::set<std::string> ssAddedIds;  // appended this session (dedup guard)
+static const char SS_REG_PATH[] = "/oui-spy/skyspy/registry.txt";
+
+static void ssRegistryLoad() {
+  File f = SD_MMC.open(SS_REG_PATH, "r");
+  if (!f) { Serial.println("[SKY-SPY] No registry yet"); return; }
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.length() > 0) ssKnownIds.insert(line.c_str());
+  }
+  f.close();
+  Serial.printf("[SKY-SPY] Registry: %u known drones\n", (unsigned)ssKnownIds.size());
+}
+
+static void ssRegistryAdd(const char* id) {
+  if (!id || !id[0]) return;
+  if (ssKnownIds.count(id) || ssAddedIds.count(id)) return;
+  ssAddedIds.insert(id);
+  File f = SD_MMC.open(SS_REG_PATH, FILE_APPEND);
+  if (!f) return;
+  f.println(id);
+  f.close();
+  Serial.printf("[SKY-SPY] Registry: added '%s'\n", id);
+}
+#endif
+
 // Thread-safe flags for buzzer (volatile for ISR access)
 volatile bool device_in_range = false;
 volatile bool trigger_detection_beep = false;
@@ -554,6 +584,10 @@ void setup() {
   Serial0.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 #endif
 
+#if HAS_SD_CARD
+  ssRegistryLoad();
+#endif
+
 #ifdef ENABLE_TFT_DISPLAY
   display_skyspy_scanning(0, 0, 0, 0, ssCurrentChannel);
 #endif
@@ -580,6 +614,14 @@ static void refreshDisplay(unsigned long now) {
              uavs[bestIdx].mac[0], uavs[bestIdx].mac[1],
              uavs[bestIdx].mac[2], uavs[bestIdx].mac[3],
              uavs[bestIdx].mac[4], uavs[bestIdx].mac[5]);
+    // Registry: determine if this drone is new this session
+    bool isNew = false;
+#if HAS_SD_CARD
+    if (uavs[bestIdx].uav_id[0]) {
+      isNew = !ssKnownIds.count(uavs[bestIdx].uav_id);
+      if (isNew) ssRegistryAdd(uavs[bestIdx].uav_id);
+    }
+#endif
     display_skyspy(mac_str, uavs[bestIdx].uav_id,
                    uavs[bestIdx].lat_d, uavs[bestIdx].long_d,
                    uavs[bestIdx].altitude_msl, uavs[bestIdx].rssi, total,
@@ -589,7 +631,7 @@ static void refreshDisplay(unsigned long now) {
 #else
                    0,
 #endif
-                   ssCurrentChannel);
+                   ssCurrentChannel, isNew);
   } else {
     display_skyspy_scanning(total,
 #if HAS_GPS
