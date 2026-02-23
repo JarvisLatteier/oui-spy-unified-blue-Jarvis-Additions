@@ -56,8 +56,10 @@ static double prevQrLat = 0.0, prevQrLon = 0.0;
 static double prevQrPilotLat = 0.0, prevQrPilotLon = 0.0;
 
 // SD status cache
-static bool sd_ok = false;
+static bool sd_ok   = false;
 static int  sd_files = 0;
+static bool sd_low  = false;
+static bool sd_full = false;
 
 // Touch state
 static bool touch_ready = false;
@@ -169,7 +171,11 @@ static void drawFooter(const char* text) {
 
     // SD indicator on right side
     char sdBuf[24];
-    if (sd_ok) {
+    if (sd_full) {
+        snprintf(sdBuf, sizeof(sdBuf), "SD:FULL");
+    } else if (sd_low) {
+        snprintf(sdBuf, sizeof(sdBuf), "SD:LOW / Files:%d", sd_files);
+    } else if (sd_ok) {
         snprintf(sdBuf, sizeof(sdBuf), "SD:OK / Files:%d", sd_files);
     } else {
         snprintf(sdBuf, sizeof(sdBuf), "SD:---");
@@ -800,9 +806,11 @@ int display_skyspy_touch() {
     return 0;
 }
 
-void display_sd_status(bool inserted, int fileCount) {
-    sd_ok = inserted;
+void display_sd_status(bool inserted, int fileCount, bool low, bool full) {
+    sd_ok    = inserted;
     sd_files = fileCount;
+    sd_low   = low;
+    sd_full  = full;
 }
 
 void display_clear() {

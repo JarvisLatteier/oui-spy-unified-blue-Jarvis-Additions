@@ -318,7 +318,7 @@ void display_skyspy_scanning(int count, double /*devLat*/, double /*devLon*/,
 
 int display_skyspy_touch() { return 0; }  // no touch on T-Dongle
 
-void display_sd_status(bool inserted, int fileCount) {
+void display_sd_status(bool inserted, int fileCount, bool /*low*/, bool /*full*/) {
     sd_ok = inserted;
     sd_files = fileCount;
 }

@@ -31,7 +31,7 @@ void display_skyspy(const char* mac, const char* id, double lat, double lon,
                     int gpsSats = 0, int wifiCh = 6, int sessionsSeen = 0);
 void display_skyspy_scanning(int count, double devLat = 0, double devLon = 0,
                              int gpsSats = 0, int wifiCh = 6);
-void display_sd_status(bool inserted, int fileCount);
+void display_sd_status(bool inserted, int fileCount, bool low = false, bool full = false);
 int  display_skyspy_touch();  // returns 1=SETTINGS, 0=none
 void display_skyspy_settings(uint8_t dispBr, uint8_t ledBr, uint8_t vol,
                              bool bleOn, bool incognito);
@@ -72,7 +72,7 @@ inline void display_skyspy(const char*, const char*, double, double,
                            int, int, int,
                            double = 0, double = 0, int = 0, int = 6, int = 0) {}
 inline void display_skyspy_scanning(int, double = 0, double = 0, int = 0, int = 6) {}
-inline void display_sd_status(bool, int) {}
+inline void display_sd_status(bool, int, bool = false, bool = false) {}
 inline int  display_skyspy_touch() { return 0; }
 inline void display_skyspy_settings(uint8_t, uint8_t, uint8_t, bool, bool) {}
 inline void display_clear() {}

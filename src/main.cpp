@@ -778,7 +778,8 @@ void setup() {
     // Update display with SD card status (after mode is known for file count)
 #if HAS_SD_CARD
     if (sdlog_available()) {
-        display_sd_status(true, sdlog_mode_file_count(currentMode));
+        display_sd_status(true, sdlog_mode_file_count(currentMode),
+                          sdlog_is_low(), sdlog_is_full());
     } else {
         display_sd_status(false, 0);
     }

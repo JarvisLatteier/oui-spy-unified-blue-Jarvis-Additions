@@ -28,7 +28,13 @@ static const char* modeDirs[] = {
     "skyspy"      // 5
 };
 
-static bool     _mounted = false;
+// Free-space thresholds
+static const uint64_t SD_WARN_MB = 50ULL  * 1024 * 1024;  // show warning below 50 MB
+static const uint64_t SD_CRIT_MB =  5ULL  * 1024 * 1024;  // suspend writes below 5 MB
+
+static bool     _mounted  = false;
+static bool     _sdLow    = false;   // free < SD_WARN_MB
+static bool     _sdFull   = false;   // free < SD_CRIT_MB (writes suspended)
 static File     _logFile;
 static int      _currentMode = -1;
 static char     _logPath[64] = "";
@@ -64,6 +70,14 @@ static int nextSessionNumber(const char* dirPath) {
         f = dir.openNextFile();
     }
     return maxNum + 1;
+}
+
+static void checkSpace() {
+    uint64_t free = SD_MMC.totalBytes() - SD_MMC.usedBytes();
+    _sdFull = (free < SD_CRIT_MB);
+    _sdLow  = (free < SD_WARN_MB);
+    if (_sdFull) Serial.printf("[SD] CRITICAL: only %llu KB free — logging suspended\n", free / 1024);
+    else if (_sdLow) Serial.printf("[SD] WARNING: only %llu MB free\n", free / (1024*1024));
 }
 
 static void flushBuffer() {
@@ -122,6 +136,7 @@ void sdlog_start_session(int mode) {
     snprintf(dirPath, sizeof(dirPath), "/oui-spy/%s", modeDir(mode));
     ensureDir(dirPath);
 
+    checkSpace();
     int num = nextSessionNumber(dirPath);
     snprintf(_logPath, sizeof(_logPath), "%s/session_%06d.jsonl", dirPath, num);
     Serial.printf("[SD] Session ready: %s (deferred)\n", _logPath);
@@ -138,7 +153,7 @@ static void openLogFileIfNeeded() {
 }
 
 void sdlog_write(int mode, const char* jsonLine) {
-    if (!_mounted) return;
+    if (!_mounted || _sdFull) return;
     openLogFileIfNeeded();
     if (!_logFile) return;
 
@@ -206,5 +221,8 @@ int sdlog_mode_file_count(int mode) {
     }
     return count;
 }
+
+bool sdlog_is_low()  { return _sdLow;  }
+bool sdlog_is_full() { return _sdFull; }
 
 #endif // HAS_SD_CARD
