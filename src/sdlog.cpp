@@ -216,10 +216,16 @@ int sdlog_mode_file_count(int mode) {
     int count = 0;
     File f = dir.openNextFile();
     while (f) {
-        count++;
+        const char* name = f.name();
+        int len = strlen(name);
+        if (len > 6 && strcmp(name + len - 6, ".jsonl") == 0) count++;
         f = dir.openNextFile();
     }
     return count;
+}
+
+const char* sdlog_session_path() {
+    return _logPath[0] ? _logPath : nullptr;
 }
 
 bool sdlog_is_low()  { return _sdLow;  }

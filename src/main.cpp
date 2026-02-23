@@ -902,6 +902,9 @@ static void checkBootButtonLoop() {
                 // In any other mode: long press returns to selector menu
                 Serial.println("\n[OUI-SPY] *** BOOT BUTTON HELD -> RETURNING TO MENU ***");
                 Serial.flush();
+#if HAS_SD_CARD
+                if (currentMode == 5) skyspy_session_end();
+#endif
 #if HAS_BUZZER
 #ifdef BOARD_CYD_S3
                 for (int i = 0; i < 3; i++) {

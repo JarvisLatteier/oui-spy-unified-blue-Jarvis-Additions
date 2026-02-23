@@ -16,5 +16,6 @@ void flockyou_loop();
 // Mode 5: Sky Spy
 void skyspy_setup();
 void skyspy_loop();
+void skyspy_session_end();  // call before reboot for clean session summary + registry flush
 
 #endif // MODES_H

@@ -78,4 +78,5 @@ void skyspy_setup() {
 #endif
     skyspy_ns_setup();
 }
-void skyspy_loop()  { skyspy_ns_loop(); }
+void skyspy_loop()         { skyspy_ns_loop(); }
+void skyspy_session_end()  { ssSessionEnd(); }

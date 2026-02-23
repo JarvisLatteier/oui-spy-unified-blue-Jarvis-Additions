@@ -265,7 +265,72 @@ static uint32_t ssRegistryUpdate(const char* uas_id, const char* op_id,
   if (needsSave) ssRegistrySave();
   return e.sessions;
 }
+
+static void ssWriteSessionSummary() {
+  const char* sessionPath = sdlog_session_path();
+  if (!sessionPath) return;  // no detections this session — nothing to summarise
+
+  // Derive summary path: replace ".jsonl" suffix with "_summary.json"
+  char summaryPath[80];
+  strncpy(summaryPath, sessionPath, sizeof(summaryPath) - 1);
+  summaryPath[sizeof(summaryPath) - 1] = '\0';
+  char* dot = strrchr(summaryPath, '.');
+  if (dot) strcpy(dot, "_summary.json");
+  else     strncat(summaryPath, "_summary.json", sizeof(summaryPath) - strlen(summaryPath) - 1);
+
+  // Count unique drones seen this session
+  int totalDrones = 0, newDrones = 0;
+  for (int i = 0; i < MAX_UAVS; i++) {
+    if (uavs[i].mac[0] == 0) continue;
+    totalDrones++;
+    if (ssRegistry.count(uavs[i].uav_id) && ssRegistry[uavs[i].uav_id].sessions == 1)
+      newDrones++;
+  }
+
+  unsigned long durationS = (millis() - ssSessionStartMs) / 1000UL;
+
+  JsonDocument doc;
+  doc["v"]          = 1;
+  doc["mode"]       = 5;
+  doc["session"]    = sessionPath;
+  doc["duration_s"] = durationS;
+  doc["total"]      = totalDrones;
+  doc["new"]        = newDrones;
+
+  JsonArray arr = doc["drones"].to<JsonArray>();
+  for (int i = 0; i < MAX_UAVS; i++) {
+    if (uavs[i].mac[0] == 0) continue;
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+             uavs[i].mac[0], uavs[i].mac[1], uavs[i].mac[2],
+             uavs[i].mac[3], uavs[i].mac[4], uavs[i].mac[5]);
+    JsonObject d = arr.add<JsonObject>();
+    d["id"]   = uavs[i].uav_id;
+    d["mac"]  = mac_str;
+    d["lat"]  = uavs[i].lat_d;
+    d["lon"]  = uavs[i].long_d;
+    d["alt"]  = uavs[i].altitude_msl;
+    d["rssi"] = uavs[i].rssi;
+    if (ssRegistry.count(uavs[i].uav_id))
+      d["sessions"] = ssRegistry[uavs[i].uav_id].sessions;
+  }
+
+  File f = SD_MMC.open(summaryPath, FILE_WRITE);
+  if (f) {
+    serializeJson(doc, f);
+    f.close();
+    Serial.printf("[SKY-SPY] Session summary: %s\n", summaryPath);
+  }
+  ssRegistrySave();  // flush any unsaved registry changes
+}
 #endif
+
+static void ssSessionEnd() {
+#if HAS_SD_CARD
+  sdlog_flush();
+  ssWriteSessionSummary();
+#endif
+}
 
 // Thread-safe flags for buzzer (volatile for ISR access)
 volatile bool device_in_range = false;
